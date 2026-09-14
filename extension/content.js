@@ -48,12 +48,6 @@ function locateCard(link) {
 
   let node = link;
 
-  // Current AliExpress search cards often use generated class names, so avoid
-  // depending on classes. The nearest useful card is the first ancestor that:
-  //   * is large enough to be a product tile,
-  //   * contains a product image,
-  //   * contains a visible localized price, and
-  //   * contains links for only this product id.
   for (let depth = 0; depth < 14 && node?.parentElement; depth += 1) {
     node = node.parentElement;
     if (!node) break;
@@ -64,12 +58,7 @@ function locateCard(link) {
     if (!hasVisiblePrice(node)) continue;
 
     const ids = distinctProductIds(node);
-    if (ids.size === 1 && ids.has(wantedId)) {
-      return node;
-    }
-
-    // Once we reach a container with multiple products we've climbed out of
-    // the individual card. Do not attach there.
+    if (ids.size === 1 && ids.has(wantedId)) return node;
     if (ids.size > 1) break;
   }
 
@@ -113,12 +102,68 @@ function removePanel(card) {
 
 function skuDisplayLabel(sku) {
   const rawAttr = String(sku?.skuAttr || '').trim();
-  if (rawAttr) return rawAttr;
+  if (rawAttr) {
+    const labels = rawAttr
+      .split(';')
+      .map((part) => {
+        const hash = part.indexOf('#');
+        return hash >= 0 ? part.slice(hash + 1).trim() : '';
+      })
+      .filter(Boolean);
+
+    if (labels.length) return labels.join(' · ');
+  }
 
   const rawPath = String(sku?.skuPath || '').trim();
   if (rawPath) return `path ${rawPath}`;
 
   return `SKU ${sku?.skuId || '?'}`;
+}
+
+function createSkuRow(sku, currency, unavailable = false) {
+  const row = document.createElement('div');
+  Object.assign(row.style, {
+    display: 'grid',
+    gridTemplateColumns: 'minmax(0, 1fr) auto',
+    gap: '8px',
+    padding: '7px 0',
+    borderTop: '1px solid #eee',
+    alignItems: 'start',
+    opacity: unavailable ? '0.58' : '1'
+  });
+
+  const left = document.createElement('div');
+  left.style.minWidth = '0';
+
+  const label = document.createElement('div');
+  label.textContent = skuDisplayLabel(sku);
+  label.title = `SKU ${sku.skuId}${sku.skuPath ? `\npath ${sku.skuPath}` : ''}`;
+  Object.assign(label.style, {
+    color: '#333',
+    overflowWrap: 'anywhere',
+    wordBreak: 'break-word'
+  });
+  left.appendChild(label);
+
+  const meta = document.createElement('div');
+  Object.assign(meta.style, {
+    marginTop: '2px',
+    color: '#888',
+    fontSize: '9px',
+    overflowWrap: 'anywhere'
+  });
+  const stockText = sku.salable === false
+    ? 'sold out'
+    : (sku.salable === true ? `saleable${Number.isFinite(sku.stock) ? ` · stock ${sku.stock}` : ''}` : 'saleability unknown');
+  meta.textContent = `SKU ${sku.skuId} · ${stockText}${sku.priceSource ? ` · ${sku.priceSource}` : ''}`;
+  left.appendChild(meta);
+
+  const price = document.createElement('strong');
+  price.textContent = sku.salePriceString || money(sku.salePrice, sku.currency || currency);
+  if (sku.discount) price.title = sku.discount;
+
+  row.append(left, price);
+  return row;
 }
 
 function renderPanel(card, result) {
@@ -191,7 +236,7 @@ function renderPanel(card, result) {
   const summary = document.createElement('div');
   summary.style.marginBottom = '4px';
   const countText = Number.isFinite(result.saleableCount)
-    ? `${result.saleableCount} saleable / ${result.count} backend SKU${result.count === 1 ? '' : 's'}`
+    ? `${result.saleableCount} available variant${result.saleableCount === 1 ? '' : 's'}`
     : `${result.count} backend SKU${result.count === 1 ? '' : 's'}`;
   summary.textContent = `${countText} · ${money(result.min, currency)} – ${money(result.max, currency)}`;
   panel.appendChild(summary);
@@ -199,7 +244,7 @@ function renderPanel(card, result) {
   if (result.targetPriceString) {
     const target = document.createElement('div');
     Object.assign(target.style, { marginBottom: '6px', fontWeight: '700', color: '#b00020' });
-    target.textContent = `Target/displayed price: ${result.targetPriceString}`;
+    target.textContent = `Displayed price: ${result.targetPriceString}`;
     panel.appendChild(target);
   }
 
@@ -211,53 +256,36 @@ function renderPanel(card, result) {
   locale.textContent = `${result.prefs?.country || '?'} / ${currency} · ${result.prefs?.source || 'unknown locale source'}${context}`;
   panel.appendChild(locale);
 
-  const list = document.createElement('div');
-  for (const sku of result.skus) {
-    const row = document.createElement('div');
-    Object.assign(row.style, {
-      display: 'grid',
-      gridTemplateColumns: 'minmax(0, 1fr) auto',
-      gap: '8px',
-      padding: '7px 0',
-      borderTop: '1px solid #eee',
-      alignItems: 'start',
-      opacity: sku.salable === false ? '0.58' : '1'
-    });
+  const available = result.skus.filter((sku) => sku.salable === true);
+  const unknown = result.skus.filter((sku) => sku.salable == null);
+  const unavailable = result.skus.filter((sku) => sku.salable === false);
 
-    const left = document.createElement('div');
-    left.style.minWidth = '0';
-
-    const label = document.createElement('div');
-    label.textContent = skuDisplayLabel(sku);
-    label.title = `SKU ${sku.skuId}${sku.skuPath ? `\npath ${sku.skuPath}` : ''}`;
-    Object.assign(label.style, {
-      color: '#333',
-      overflowWrap: 'anywhere',
-      wordBreak: 'break-word'
-    });
-    left.appendChild(label);
-
-    const meta = document.createElement('div');
-    Object.assign(meta.style, {
-      marginTop: '2px',
-      color: '#888',
-      fontSize: '9px',
-      overflowWrap: 'anywhere'
-    });
-    const stockText = sku.salable === false
-      ? 'sold out'
-      : (sku.salable === true ? `saleable${Number.isFinite(sku.stock) ? ` · stock ${sku.stock}` : ''}` : 'saleability unknown');
-    meta.textContent = `SKU ${sku.skuId} · ${stockText}${sku.priceSource ? ` · ${sku.priceSource}` : ''}`;
-    left.appendChild(meta);
-
-    const price = document.createElement('strong');
-    price.textContent = sku.salePriceString || money(sku.salePrice, sku.currency || currency);
-    if (sku.discount) price.title = sku.discount;
-
-    row.append(left, price);
-    list.appendChild(row);
+  const mainList = document.createElement('div');
+  for (const sku of [...available, ...unknown]) {
+    mainList.appendChild(createSkuRow(sku, currency, false));
   }
-  panel.appendChild(list);
+  panel.appendChild(mainList);
+
+  if (unavailable.length) {
+    const details = document.createElement('details');
+    details.style.marginTop = '8px';
+
+    const summaryToggle = document.createElement('summary');
+    summaryToggle.textContent = `${unavailable.length} unavailable backend SKU${unavailable.length === 1 ? '' : 's'}`;
+    Object.assign(summaryToggle.style, {
+      cursor: 'pointer',
+      color: '#666',
+      fontSize: '10px',
+      userSelect: 'none'
+    });
+    details.appendChild(summaryToggle);
+
+    const soldOutList = document.createElement('div');
+    for (const sku of unavailable) soldOutList.appendChild(createSkuRow(sku, currency, true));
+    details.appendChild(soldOutList);
+    panel.appendChild(details);
+  }
+
   card.appendChild(panel);
 }
 
