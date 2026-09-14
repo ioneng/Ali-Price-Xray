@@ -47,8 +47,6 @@ function effectivePrice(entry) {
     return { text: null, value: null, currency: null, source: null };
   }
 
-  // Current AliExpress sale events commonly put the actually displayed product-page
-  // price in warmUpPrice. Prefer it before the ordinary sale price.
   const warmText = formattedAmount(entry.warmUpPrice);
   if (warmText) {
     return {
@@ -83,27 +81,114 @@ async function tokenFor() {
   }
 }
 
-async function localePreferences(senderUrl) {
-  let siteUrl = 'https://www.aliexpress.com/';
+function siteUrlFromSender(senderUrl) {
   try {
     const parsed = new URL(senderUrl);
-    if (parsed.hostname.endsWith('aliexpress.us')) siteUrl = 'https://www.aliexpress.us/';
-    else if (parsed.hostname.endsWith('aliexpress.com')) siteUrl = 'https://www.aliexpress.com/';
+    if (parsed.hostname.endsWith('aliexpress.us')) return 'https://www.aliexpress.us/';
   } catch {}
+  return 'https://www.aliexpress.com/';
+}
+
+async function localePreferences(senderUrl) {
+  const siteUrl = siteUrlFromSender(senderUrl);
 
   try {
-    const cookie = await api.cookies.get({ url: siteUrl, name: 'aep_usuc_f' });
-    const values = new URLSearchParams(cookie?.value || '');
+    const [localeCookie, sessionCookie, loginCookie] = await Promise.all([
+      api.cookies.get({ url: siteUrl, name: 'aep_usuc_f' }).catch(() => null),
+      api.cookies.get({ url: siteUrl, name: 'acs_usuc_t' }).catch(() => null),
+      api.cookies.get({ url: siteUrl, name: 'xman_us_t' }).catch(() => null)
+    ]);
+
+    const values = new URLSearchParams(localeCookie?.value || '');
+    const sessionValues = new URLSearchParams(sessionCookie?.value || '');
+    const country = values.get('region') || 'AU';
+    const locale = values.get('b_locale') || 'en_US';
+    const language = locale.split(/[_-]/, 1)[0] || 'en';
+
     return {
       currency: values.get('c_tp') || 'AUD',
-      country: values.get('region') || 'AU',
-      locale: values.get('b_locale') || 'en_US',
-      source: cookie?.value ? 'aep_usuc_f' : 'prototype-default'
+      country,
+      locale,
+      lang: `${language}_${country}`,
+      province: values.get('province') || null,
+      city: values.get('city') || null,
+      site: values.get('site') || 'glo',
+      foreverRandomToken: sessionValues.get('acs_rt') || null,
+      signedIn: Boolean(loginCookie?.value),
+      source: localeCookie?.value ? 'aep_usuc_f' : 'prototype-default'
     };
   } catch (error) {
     log('locale cookie lookup failed', error);
-    return { currency: 'AUD', country: 'AU', locale: 'en_US', source: 'prototype-default' };
+    return {
+      currency: 'AUD',
+      country: 'AU',
+      locale: 'en_US',
+      lang: 'en_AU',
+      province: null,
+      city: null,
+      site: 'glo',
+      foreverRandomToken: null,
+      signedIn: false,
+      source: 'prototype-default'
+    };
   }
+}
+
+function searchContextFromUrl(productUrl) {
+  if (!productUrl) return { fields: [] };
+
+  try {
+    const url = new URL(productUrl);
+    const pdpExtF = url.searchParams.get('pdp_ext_f') || null;
+    const pdpNPI = url.searchParams.get('pdp_npi')
+      || url.searchParams.get('pdpNPI')
+      || null;
+
+    const fields = [];
+    if (pdpExtF) fields.push('pdp_ext_f');
+    if (pdpNPI) fields.push('pdpNPI');
+
+    return { pdpExtF, pdpNPI, fields };
+  } catch {
+    return { fields: [] };
+  }
+}
+
+function senderHost(senderUrl) {
+  try {
+    return new URL(senderUrl).hostname || 'www.aliexpress.com';
+  } catch {
+    return 'www.aliexpress.com';
+  }
+}
+
+function buildPdpData(productId, prefs, senderUrl, productUrl) {
+  const context = searchContextFromUrl(productUrl);
+  const payload = {
+    productId: String(productId),
+    _lang: prefs.lang,
+    _currency: prefs.currency,
+    country: prefs.country,
+    channel: ''
+  };
+
+  if (prefs.province) payload.province = prefs.province;
+  if (prefs.city) payload.city = prefs.city;
+  if (context.pdpExtF) payload.pdp_ext_f = context.pdpExtF;
+  if (context.pdpNPI) payload.pdpNPI = context.pdpNPI;
+
+  payload.sourceType = '';
+  payload.clientType = 'pc';
+  payload.ext = JSON.stringify({
+    ...(prefs.foreverRandomToken ? { foreverRandomToken: prefs.foreverRandomToken } : {}),
+    site: prefs.site || 'glo',
+    crawler: false,
+    'x-m-biz-bx-region': '',
+    signedIn: Boolean(prefs.signedIn),
+    host: senderHost(senderUrl)
+  });
+
+  return { data: JSON.stringify(payload), contextFields: context.fields };
 }
 
 async function pdpCall(data, token) {
@@ -158,7 +243,7 @@ function priceMapFromResponse(response) {
   return { result, map: null, path: null };
 }
 
-function activeSkuEntries(result, map) {
+function skuEntries(result, map) {
   if (!map || typeof map !== 'object') return [];
 
   const rawPaths = result?.SKU?.skuPaths;
@@ -176,7 +261,6 @@ function activeSkuEntries(result, map) {
     }).filter(Boolean);
   }
 
-  // Fallback for listings whose response omits skuPaths.
   return Object.entries(map).map(([skuId, entry]) => ({ skuId, entry, path: null }));
 }
 
@@ -186,6 +270,10 @@ function normalizeSkuEntries(entries) {
     const currency = current.currency
       || entry?.originalPrice?.currency
       || null;
+    const stock = Number.isFinite(Number(path?.skuStock)) ? Number(path.skuStock) : null;
+    const salable = typeof path?.salable === 'boolean'
+      ? path.salable
+      : (stock != null ? stock > 0 : null);
 
     return {
       skuId,
@@ -198,7 +286,9 @@ function normalizeSkuEntries(entries) {
         || entry?.originalPrice?.formattedAmount
         || null,
       skuPath: path?.path || null,
-      skuAttr: path?.skuAttr || null
+      skuAttr: path?.skuAttr || null,
+      salable,
+      stock
     };
   }).filter((sku) => sku.salePrice != null || sku.salePriceString);
 }
@@ -207,21 +297,23 @@ function currenciesIn(skus) {
   return [...new Set(skus.map((sku) => sku.currency).filter(Boolean))];
 }
 
-async function fetchSkuPrices(productId, senderUrl) {
-  const prefs = await localePreferences(senderUrl);
-  const data = JSON.stringify({
-    productId: String(productId),
-    _currency: prefs.currency,
-    country: prefs.country,
-    locale: prefs.locale,
-    pdp_ext_f: '{}'
-  });
+function responseProductId(result) {
+  const value = result?.GLOBAL_DATA?.globalData?.productId
+    ?? result?.PRICE?.productId
+    ?? result?.productInfo?.productId
+    ?? null;
+  return value == null ? null : String(value);
+}
 
-  let response = await pdpCall(data, await tokenFor());
+async function fetchSkuPrices(productId, senderUrl, productUrl) {
+  const prefs = await localePreferences(senderUrl);
+  const request = buildPdpData(productId, prefs, senderUrl, productUrl);
+
+  let response = await pdpCall(request.data, await tokenFor());
   let retText = String(response?.ret || '');
 
   if (/TOKEN_(EMPTY|EXPIRED|EXOIRED)/i.test(retText)) {
-    response = await pdpCall(data, await tokenFor());
+    response = await pdpCall(request.data, await tokenFor());
     retText = String(response?.ret || '');
   }
 
@@ -236,8 +328,20 @@ async function fetchSkuPrices(productId, senderUrl) {
   }
 
   const { result, map, path } = priceMapFromResponse(response);
-  const activeEntries = activeSkuEntries(result, map);
-  const skus = normalizeSkuEntries(activeEntries);
+  const returnedProductId = responseProductId(result);
+  if (returnedProductId && returnedProductId !== String(productId)) {
+    return {
+      ok: false,
+      productId: String(productId),
+      prefs,
+      ret: retText,
+      error: `AliExpress returned product ${returnedProductId} instead of ${productId}.`,
+      debug: { contextFields: request.contextFields }
+    };
+  }
+
+  const entries = skuEntries(result, map);
+  const skus = normalizeSkuEntries(entries);
 
   if (!skus.length) {
     return {
@@ -245,13 +349,14 @@ async function fetchSkuPrices(productId, senderUrl) {
       productId: String(productId),
       prefs,
       ret: retText,
-      error: 'Request succeeded, but no active SKU prices could be joined to SKU paths.',
+      error: 'Request succeeded, but no SKU prices could be joined to SKU paths.',
       debug: {
         mapPath: path,
         priceMapCount: map && typeof map === 'object' ? Object.keys(map).length : 0,
         skuPathCount: Array.isArray(result?.SKU?.skuPaths)
           ? result.SKU.skuPaths.length
-          : Object.keys(result?.SKU?.skuPaths || {}).length
+          : Object.keys(result?.SKU?.skuPaths || {}).length,
+        contextFields: request.contextFields
       }
     };
   }
@@ -272,13 +377,20 @@ async function fetchSkuPrices(productId, senderUrl) {
         mapPath: path,
         apiCurrency,
         skuCurrencies,
-        samplePrices: skus.slice(0, 5).map(({ skuId, salePriceString, currency, priceSource }) => ({ skuId, salePriceString, currency, priceSource }))
+        samplePrices: skus.slice(0, 5).map(({ skuId, salePriceString, currency, priceSource }) => ({ skuId, salePriceString, currency, priceSource })),
+        contextFields: request.contextFields
       }
     };
   }
 
-  skus.sort((a, b) => (a.salePrice ?? Infinity) - (b.salePrice ?? Infinity));
-  const numeric = skus.map((sku) => sku.salePrice).filter(Number.isFinite);
+  skus.sort((a, b) => {
+    if (a.salable !== b.salable) return a.salable === true ? -1 : (b.salable === true ? 1 : 0);
+    return (a.salePrice ?? Infinity) - (b.salePrice ?? Infinity);
+  });
+
+  const saleableSkus = skus.filter((sku) => sku.salable === true);
+  const rangeSkus = saleableSkus.length ? saleableSkus : skus;
+  const numeric = rangeSkus.map((sku) => sku.salePrice).filter(Number.isFinite);
   const target = result?.PRICE?.targetSkuPriceInfo || null;
   const targetEffective = effectivePrice(target);
 
@@ -288,16 +400,20 @@ async function fetchSkuPrices(productId, senderUrl) {
     prefs,
     ret: retText,
     count: skus.length,
+    saleableCount: saleableSkus.length,
     min: numeric.length ? Math.min(...numeric) : null,
     max: numeric.length ? Math.max(...numeric) : null,
+    targetPrice: targetEffective.value,
+    targetPriceString: targetEffective.text,
     skus,
     debug: {
       mapPath: path,
       apiCurrency,
       priceMapCount: map && typeof map === 'object' ? Object.keys(map).length : 0,
-      activeSkuCount: activeEntries.length,
-      targetPriceString: targetEffective.text,
-      targetPriceSource: targetEffective.source
+      skuPathCount: entries.length,
+      targetPriceSource: targetEffective.source,
+      selectedSkuId: result?.SKU?.selectedSkuIdStr || result?.SKU?.selectedSkuId || result?.PRICE?.selectedSkuId || null,
+      contextFields: request.contextFields
     }
   };
 }
@@ -306,7 +422,7 @@ api.runtime.onMessage.addListener((message, sender) => {
   if (message?.type !== 'xray:fetch-skus' || !message.productId) return undefined;
 
   log('fetching', message.productId, 'from', sender?.url);
-  return fetchSkuPrices(message.productId, sender?.url)
+  return fetchSkuPrices(message.productId, sender?.url, message.productUrl)
     .catch((error) => ({
       ok: false,
       productId: String(message.productId),
