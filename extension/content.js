@@ -2,6 +2,7 @@ const api = globalThis.browser ?? globalThis.chrome;
 const TAG = '[Ali-Price-Xray]';
 
 const log = (...args) => console.debug(TAG, ...args);
+const isMobileLayout = () => window.matchMedia('(max-width: 640px), (pointer: coarse)').matches;
 
 function productIdFromHref(href) {
   if (!href) return null;
@@ -86,8 +87,14 @@ function ensurePositioned(card) {
   if (getComputedStyle(card).position === 'static') card.style.position = 'relative';
 }
 
-function removePanel(card) {
-  card.querySelector(':scope > .ali-price-xray-panel')?.remove();
+function findPanel(productId) {
+  return [...document.querySelectorAll('.ali-price-xray-panel')]
+    .find((panel) => panel.dataset.productId === String(productId)) || null;
+}
+
+function removePanel(card, productId) {
+  card?.querySelector(':scope > .ali-price-xray-panel')?.remove();
+  if (productId) findPanel(productId)?.remove();
 }
 
 function skuDisplayLabel(sku) {
@@ -118,6 +125,7 @@ function showImagePreview(url, label) {
   if (!src) return;
   document.querySelector('.ali-price-xray-image-preview')?.remove();
 
+  const mobile = isMobileLayout();
   const overlay = document.createElement('div');
   overlay.className = 'ali-price-xray-image-preview';
   Object.assign(overlay.style, {
@@ -127,16 +135,19 @@ function showImagePreview(url, label) {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: '24px',
-    background: 'rgba(0,0,0,.72)',
+    boxSizing: 'border-box',
+    padding: mobile ? '12px' : '24px',
+    background: 'rgba(0,0,0,.76)',
     cursor: 'zoom-out'
   });
 
   const box = document.createElement('div');
   Object.assign(box.style, {
-    maxWidth: 'min(760px, 90vw)',
-    maxHeight: '90vh',
-    padding: '10px',
+    width: mobile ? '100%' : 'auto',
+    maxWidth: mobile ? '100%' : 'min(760px, 90vw)',
+    maxHeight: mobile ? 'calc(100vh - 24px)' : '90vh',
+    boxSizing: 'border-box',
+    padding: mobile ? '8px' : '10px',
     borderRadius: '12px',
     background: '#fff',
     boxShadow: '0 16px 50px rgba(0,0,0,.45)',
@@ -148,8 +159,9 @@ function showImagePreview(url, label) {
   image.alt = label || 'SKU option image';
   Object.assign(image.style, {
     display: 'block',
-    maxWidth: 'min(720px, 86vw)',
-    maxHeight: '78vh',
+    maxWidth: '100%',
+    width: mobile ? '100%' : 'auto',
+    maxHeight: mobile ? 'calc(100vh - 100px)' : '78vh',
     objectFit: 'contain',
     margin: '0 auto'
   });
@@ -159,7 +171,7 @@ function showImagePreview(url, label) {
   Object.assign(caption.style, {
     marginTop: '8px',
     color: '#222',
-    font: '12px/1.35 system-ui, sans-serif',
+    font: mobile ? '14px/1.35 system-ui, sans-serif' : '12px/1.35 system-ui, sans-serif',
     textAlign: 'center'
   });
 
@@ -171,13 +183,15 @@ function showImagePreview(url, label) {
 }
 
 function createSkuRow(sku, currency, unavailable = false) {
+  const mobile = isMobileLayout();
   const row = document.createElement('div');
   const imageUrl = normalizedImageUrl(sku.imageUrl);
+  const thumbSize = mobile ? 58 : 46;
   Object.assign(row.style, {
     display: 'grid',
-    gridTemplateColumns: imageUrl ? '48px minmax(0, 1fr) auto' : 'minmax(0, 1fr) auto',
-    gap: '8px',
-    padding: '7px 0',
+    gridTemplateColumns: imageUrl ? `${thumbSize + 2}px minmax(0, 1fr) auto` : 'minmax(0, 1fr) auto',
+    gap: mobile ? '10px' : '8px',
+    padding: mobile ? '10px 0' : '7px 0',
     borderTop: '1px solid #eee',
     alignItems: 'center',
     opacity: unavailable ? '0.58' : '1'
@@ -188,16 +202,17 @@ function createSkuRow(sku, currency, unavailable = false) {
     thumb.src = imageUrl;
     thumb.alt = skuDisplayLabel(sku);
     thumb.loading = 'lazy';
-    thumb.title = 'Click to enlarge option image';
+    thumb.title = 'Tap to enlarge option image';
     Object.assign(thumb.style, {
-      width: '46px',
-      height: '46px',
+      width: `${thumbSize}px`,
+      height: `${thumbSize}px`,
       boxSizing: 'border-box',
       objectFit: 'contain',
       border: '1px solid #ddd',
-      borderRadius: '6px',
+      borderRadius: '7px',
       background: '#fff',
-      cursor: 'zoom-in'
+      cursor: 'zoom-in',
+      touchAction: 'manipulation'
     });
     thumb.addEventListener('click', (event) => {
       event.preventDefault();
@@ -216,6 +231,7 @@ function createSkuRow(sku, currency, unavailable = false) {
   label.title = `SKU ${sku.skuId}${sku.skuPath ? `\npath ${sku.skuPath}` : ''}`;
   Object.assign(label.style, {
     color: '#333',
+    fontSize: mobile ? '14px' : '12px',
     overflowWrap: 'anywhere',
     wordBreak: 'break-word'
   });
@@ -223,9 +239,9 @@ function createSkuRow(sku, currency, unavailable = false) {
 
   const meta = document.createElement('div');
   Object.assign(meta.style, {
-    marginTop: '2px',
+    marginTop: '3px',
     color: '#888',
-    fontSize: '9px',
+    fontSize: mobile ? '11px' : '9px',
     overflowWrap: 'anywhere'
   });
   const stockText = sku.salable === false
@@ -236,6 +252,8 @@ function createSkuRow(sku, currency, unavailable = false) {
 
   const price = document.createElement('strong');
   price.textContent = sku.salePriceString || money(sku.salePrice, sku.currency || currency);
+  price.style.fontSize = mobile ? '14px' : '12px';
+  price.style.whiteSpace = 'nowrap';
   if (sku.discount) price.title = sku.discount;
 
   row.append(left, price);
@@ -243,12 +261,34 @@ function createSkuRow(sku, currency, unavailable = false) {
 }
 
 function renderPanel(card, result) {
-  removePanel(card);
+  removePanel(card, result.productId);
   ensurePositioned(card);
 
+  const mobile = isMobileLayout();
   const panel = document.createElement('div');
   panel.className = 'ali-price-xray-panel';
-  Object.assign(panel.style, {
+  panel.dataset.productId = String(result.productId);
+  Object.assign(panel.style, mobile ? {
+    position: 'fixed',
+    zIndex: '2147483646',
+    top: 'max(8px, env(safe-area-inset-top))',
+    right: '8px',
+    bottom: 'max(8px, env(safe-area-inset-bottom))',
+    left: '8px',
+    width: 'auto',
+    maxHeight: 'none',
+    overflow: 'auto',
+    overscrollBehavior: 'contain',
+    WebkitOverflowScrolling: 'touch',
+    boxSizing: 'border-box',
+    padding: '12px',
+    border: '1px solid rgba(0,0,0,.25)',
+    borderRadius: '14px',
+    background: 'rgba(255,255,255,.99)',
+    color: '#111',
+    boxShadow: '0 8px 32px rgba(0,0,0,.32)',
+    font: '14px/1.4 system-ui, sans-serif'
+  } : {
     position: 'absolute',
     zIndex: '2147483646',
     top: '36px',
@@ -270,13 +310,19 @@ function renderPanel(card, result) {
   close.type = 'button';
   close.textContent = '×';
   close.title = 'Close';
+  close.setAttribute('aria-label', 'Close Ali-Price-Xray');
   Object.assign(close.style, {
     float: 'right',
+    width: mobile ? '44px' : '28px',
+    height: mobile ? '44px' : '28px',
+    minWidth: mobile ? '44px' : '28px',
     border: '0',
-    background: 'transparent',
+    borderRadius: '999px',
+    background: mobile ? '#f2f2f2' : 'transparent',
     color: '#555',
-    font: '18px/1 system-ui, sans-serif',
-    cursor: 'pointer'
+    font: mobile ? '26px/1 system-ui, sans-serif' : '18px/1 system-ui, sans-serif',
+    cursor: 'pointer',
+    touchAction: 'manipulation'
   });
   close.addEventListener('click', (event) => {
     event.preventDefault();
@@ -288,6 +334,7 @@ function renderPanel(card, result) {
   const title = document.createElement('div');
   title.style.fontWeight = '700';
   title.style.marginBottom = '6px';
+  title.style.paddingRight = mobile ? '48px' : '28px';
   title.textContent = `Ali-Price-Xray · ${result.productId}`;
   panel.appendChild(title);
 
@@ -299,10 +346,10 @@ function renderPanel(card, result) {
     if (result.ret) {
       const ret = document.createElement('pre');
       ret.textContent = result.ret;
-      Object.assign(ret.style, { whiteSpace: 'pre-wrap', margin: '8px 0 0', fontSize: '10px' });
+      Object.assign(ret.style, { whiteSpace: 'pre-wrap', margin: '8px 0 0', fontSize: mobile ? '11px' : '10px' });
       panel.appendChild(ret);
     }
-    card.appendChild(panel);
+    (mobile ? document.documentElement : card).appendChild(panel);
     return;
   }
 
@@ -323,7 +370,7 @@ function renderPanel(card, result) {
   }
 
   const locale = document.createElement('div');
-  Object.assign(locale.style, { marginBottom: '8px', color: '#666', fontSize: '10px' });
+  Object.assign(locale.style, { marginBottom: '8px', color: '#666', fontSize: mobile ? '11px' : '10px' });
   const context = result.debug?.contextFields?.length
     ? ` · context: ${result.debug.contextFields.join(', ')}`
     : '';
@@ -340,23 +387,36 @@ function renderPanel(card, result) {
 
   if (unavailable.length) {
     const details = document.createElement('details');
-    details.style.marginTop = '8px';
+    details.style.marginTop = mobile ? '12px' : '8px';
+
     const summaryToggle = document.createElement('summary');
-    summaryToggle.textContent = `${unavailable.length} unavailable backend SKU${unavailable.length === 1 ? '' : 's'}`;
+    const setHiddenSkuLabel = () => {
+      summaryToggle.textContent = details.open
+        ? `Hide ${unavailable.length} unavailable SKU${unavailable.length === 1 ? '' : 's'}`
+        : `Show ${unavailable.length} hidden / unavailable SKU${unavailable.length === 1 ? '' : 's'}`;
+    };
+    setHiddenSkuLabel();
     Object.assign(summaryToggle.style, {
+      minHeight: mobile ? '44px' : 'auto',
+      display: 'flex',
+      alignItems: 'center',
       cursor: 'pointer',
-      color: '#666',
-      fontSize: '10px',
-      userSelect: 'none'
+      color: '#555',
+      fontSize: mobile ? '13px' : '10px',
+      fontWeight: '600',
+      userSelect: 'none',
+      touchAction: 'manipulation'
     });
+    details.addEventListener('toggle', setHiddenSkuLabel);
     details.appendChild(summaryToggle);
+
     const soldOutList = document.createElement('div');
     for (const sku of unavailable) soldOutList.appendChild(createSkuRow(sku, currency, true));
     details.appendChild(soldOutList);
     panel.appendChild(details);
   }
 
-  card.appendChild(panel);
+  (mobile ? document.documentElement : card).appendChild(panel);
 }
 
 function attachXray(card, productId, productUrl) {
@@ -364,6 +424,7 @@ function attachXray(card, productId, productUrl) {
   card.dataset.aliPriceXraySeen = productId;
   ensurePositioned(card);
 
+  const mobile = isMobileLayout();
   const button = document.createElement('button');
   button.type = 'button';
   button.className = 'ali-price-xray-button';
@@ -374,21 +435,24 @@ function attachXray(card, productId, productUrl) {
     zIndex: '2147483645',
     top: '6px',
     right: '6px',
-    padding: '4px 8px',
+    minWidth: mobile ? '56px' : 'auto',
+    minHeight: mobile ? '44px' : 'auto',
+    padding: mobile ? '8px 12px' : '4px 8px',
     border: '1px solid rgba(0,0,0,.28)',
     borderRadius: '999px',
-    background: 'rgba(255,255,255,.95)',
+    background: 'rgba(255,255,255,.96)',
     color: '#111',
     boxShadow: '0 1px 5px rgba(0,0,0,.15)',
-    font: '600 11px/1.3 system-ui, sans-serif',
-    cursor: 'pointer'
+    font: mobile ? '700 13px/1.3 system-ui, sans-serif' : '600 11px/1.3 system-ui, sans-serif',
+    cursor: 'pointer',
+    touchAction: 'manipulation'
   });
 
   button.addEventListener('click', async (event) => {
     event.preventDefault();
     event.stopPropagation();
 
-    const openPanel = card.querySelector(':scope > .ali-price-xray-panel');
+    const openPanel = findPanel(productId) || card.querySelector(':scope > .ali-price-xray-panel');
     if (openPanel) {
       openPanel.remove();
       return;
@@ -420,16 +484,17 @@ function ensureDebugBadge() {
   if (badge) return badge;
   badge = document.createElement('div');
   badge.id = 'ali-price-xray-debug';
+  const mobile = isMobileLayout();
   Object.assign(badge.style, {
     position: 'fixed',
     zIndex: '2147483647',
-    right: '8px',
-    bottom: '8px',
-    padding: '4px 7px',
+    right: mobile ? '6px' : '8px',
+    bottom: mobile ? 'max(6px, env(safe-area-inset-bottom))' : '8px',
+    padding: mobile ? '5px 8px' : '4px 7px',
     borderRadius: '6px',
     background: 'rgba(20,20,20,.82)',
     color: '#fff',
-    font: '11px/1.2 system-ui, sans-serif',
+    font: mobile ? '11px/1.2 system-ui, sans-serif' : '11px/1.2 system-ui, sans-serif',
     pointerEvents: 'none'
   });
   badge.textContent = 'Xray: scanning…';
