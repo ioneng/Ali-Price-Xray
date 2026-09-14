@@ -84,10 +84,14 @@ function candidateCards() {
     if (!productId || byId.has(productId)) continue;
 
     const card = locateCard(link);
-    if (card) byId.set(productId, card);
+    if (card) byId.set(productId, { card, productUrl: link.href });
   }
 
-  return [...byId.entries()].map(([productId, card]) => ({ productId, card }));
+  return [...byId.entries()].map(([productId, value]) => ({
+    productId,
+    card: value.card,
+    productUrl: value.productUrl
+  }));
 }
 
 function money(value, currency) {
@@ -128,8 +132,8 @@ function renderPanel(card, result) {
     zIndex: '2147483646',
     top: '36px',
     right: '6px',
-    width: 'min(390px, calc(100% - 12px))',
-    maxHeight: '420px',
+    width: 'min(410px, calc(100% - 12px))',
+    maxHeight: '440px',
     overflow: 'auto',
     boxSizing: 'border-box',
     padding: '10px',
@@ -185,13 +189,26 @@ function renderPanel(card, result) {
 
   const currency = result.prefs?.currency || result.skus?.find((sku) => sku.currency)?.currency || 'AUD';
   const summary = document.createElement('div');
-  summary.style.marginBottom = '8px';
-  summary.textContent = `${result.count} backend SKU${result.count === 1 ? '' : 's'} · ${money(result.min, currency)} – ${money(result.max, currency)}`;
+  summary.style.marginBottom = '4px';
+  const countText = Number.isFinite(result.saleableCount)
+    ? `${result.saleableCount} saleable / ${result.count} backend SKU${result.count === 1 ? '' : 's'}`
+    : `${result.count} backend SKU${result.count === 1 ? '' : 's'}`;
+  summary.textContent = `${countText} · ${money(result.min, currency)} – ${money(result.max, currency)}`;
   panel.appendChild(summary);
+
+  if (result.targetPriceString) {
+    const target = document.createElement('div');
+    Object.assign(target.style, { marginBottom: '6px', fontWeight: '700', color: '#b00020' });
+    target.textContent = `Target/displayed price: ${result.targetPriceString}`;
+    panel.appendChild(target);
+  }
 
   const locale = document.createElement('div');
   Object.assign(locale.style, { marginBottom: '8px', color: '#666', fontSize: '10px' });
-  locale.textContent = `${result.prefs?.country || '?'} / ${currency} · ${result.prefs?.source || 'unknown locale source'}`;
+  const context = result.debug?.contextFields?.length
+    ? ` · context: ${result.debug.contextFields.join(', ')}`
+    : '';
+  locale.textContent = `${result.prefs?.country || '?'} / ${currency} · ${result.prefs?.source || 'unknown locale source'}${context}`;
   panel.appendChild(locale);
 
   const list = document.createElement('div');
@@ -203,7 +220,8 @@ function renderPanel(card, result) {
       gap: '8px',
       padding: '7px 0',
       borderTop: '1px solid #eee',
-      alignItems: 'start'
+      alignItems: 'start',
+      opacity: sku.salable === false ? '0.58' : '1'
     });
 
     const left = document.createElement('div');
@@ -226,7 +244,10 @@ function renderPanel(card, result) {
       fontSize: '9px',
       overflowWrap: 'anywhere'
     });
-    meta.textContent = `SKU ${sku.skuId}${sku.priceSource ? ` · ${sku.priceSource}` : ''}`;
+    const stockText = sku.salable === false
+      ? 'sold out'
+      : (sku.salable === true ? `saleable${Number.isFinite(sku.stock) ? ` · stock ${sku.stock}` : ''}` : 'saleability unknown');
+    meta.textContent = `SKU ${sku.skuId} · ${stockText}${sku.priceSource ? ` · ${sku.priceSource}` : ''}`;
     left.appendChild(meta);
 
     const price = document.createElement('strong');
@@ -240,7 +261,7 @@ function renderPanel(card, result) {
   card.appendChild(panel);
 }
 
-function attachXray(card, productId) {
+function attachXray(card, productId, productUrl) {
   if (card.dataset.aliPriceXraySeen === productId) return;
   card.dataset.aliPriceXraySeen = productId;
   ensurePositioned(card);
@@ -275,7 +296,11 @@ function attachXray(card, productId) {
     button.textContent = '…';
 
     try {
-      const result = await api.runtime.sendMessage({ type: 'xray:fetch-skus', productId });
+      const result = await api.runtime.sendMessage({
+        type: 'xray:fetch-skus',
+        productId,
+        productUrl
+      });
       log('SKU result', result);
       renderPanel(card, result || { ok: false, productId, error: 'No response from extension background.' });
     } catch (error) {
@@ -318,9 +343,9 @@ function scan() {
   const candidates = candidateCards();
   let attached = 0;
 
-  for (const { productId, card } of candidates) {
+  for (const { productId, card, productUrl } of candidates) {
     if (!productId || card.dataset.aliPriceXraySeen === productId) continue;
-    attachXray(card, productId);
+    attachXray(card, productId, productUrl);
     attached += 1;
   }
 
