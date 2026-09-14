@@ -107,6 +107,16 @@ function removePanel(card) {
   card.querySelector(':scope > .ali-price-xray-panel')?.remove();
 }
 
+function skuDisplayLabel(sku) {
+  const rawAttr = String(sku?.skuAttr || '').trim();
+  if (rawAttr) return rawAttr;
+
+  const rawPath = String(sku?.skuPath || '').trim();
+  if (rawPath) return `path ${rawPath}`;
+
+  return `SKU ${sku?.skuId || '?'}`;
+}
+
 function renderPanel(card, result) {
   removePanel(card);
   ensurePositioned(card);
@@ -118,8 +128,8 @@ function renderPanel(card, result) {
     zIndex: '2147483646',
     top: '36px',
     right: '6px',
-    width: 'min(340px, calc(100% - 12px))',
-    maxHeight: '360px',
+    width: 'min(390px, calc(100% - 12px))',
+    maxHeight: '420px',
     overflow: 'auto',
     boxSizing: 'border-box',
     padding: '10px',
@@ -176,7 +186,7 @@ function renderPanel(card, result) {
   const currency = result.prefs?.currency || result.skus?.find((sku) => sku.currency)?.currency || 'AUD';
   const summary = document.createElement('div');
   summary.style.marginBottom = '8px';
-  summary.textContent = `${result.count} SKU${result.count === 1 ? '' : 's'} · ${money(result.min, currency)} – ${money(result.max, currency)}`;
+  summary.textContent = `${result.count} backend SKU${result.count === 1 ? '' : 's'} · ${money(result.min, currency)} – ${money(result.max, currency)}`;
   panel.appendChild(summary);
 
   const locale = document.createElement('div');
@@ -189,22 +199,41 @@ function renderPanel(card, result) {
     const row = document.createElement('div');
     Object.assign(row.style, {
       display: 'grid',
-      gridTemplateColumns: '1fr auto',
+      gridTemplateColumns: 'minmax(0, 1fr) auto',
       gap: '8px',
-      padding: '5px 0',
-      borderTop: '1px solid #eee'
+      padding: '7px 0',
+      borderTop: '1px solid #eee',
+      alignItems: 'start'
     });
 
-    const id = document.createElement('span');
-    id.textContent = `SKU ${sku.skuId}`;
-    id.title = sku.skuId;
-    Object.assign(id.style, { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#555' });
+    const left = document.createElement('div');
+    left.style.minWidth = '0';
+
+    const label = document.createElement('div');
+    label.textContent = skuDisplayLabel(sku);
+    label.title = `SKU ${sku.skuId}${sku.skuPath ? `\npath ${sku.skuPath}` : ''}`;
+    Object.assign(label.style, {
+      color: '#333',
+      overflowWrap: 'anywhere',
+      wordBreak: 'break-word'
+    });
+    left.appendChild(label);
+
+    const meta = document.createElement('div');
+    Object.assign(meta.style, {
+      marginTop: '2px',
+      color: '#888',
+      fontSize: '9px',
+      overflowWrap: 'anywhere'
+    });
+    meta.textContent = `SKU ${sku.skuId}${sku.priceSource ? ` · ${sku.priceSource}` : ''}`;
+    left.appendChild(meta);
 
     const price = document.createElement('strong');
     price.textContent = sku.salePriceString || money(sku.salePrice, sku.currency || currency);
     if (sku.discount) price.title = sku.discount;
 
-    row.append(id, price);
+    row.append(left, price);
     list.appendChild(row);
   }
   panel.appendChild(list);
