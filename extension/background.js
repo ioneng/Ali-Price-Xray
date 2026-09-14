@@ -10,20 +10,26 @@ const log = (...args) => console.debug(TAG, ...args);
 function parsePrice(input) {
   if (typeof input === 'number') return Number.isFinite(input) && input > 0 ? input : null;
   if (typeof input !== 'string') return null;
-  const match = input.match(/\d[\d,]*(?:\.\d+)?/);
+
+  // AliExpress also exposes salePriceLocal values such as "$9.80|9|80".
+  // Only the first segment is the actual amount; the rest are integer/fraction parts.
+  const safe = input.split('|', 1)[0];
+  const match = safe.match(/\d[\d,]*(?:\.\d+)?/);
   if (!match) return null;
   const value = Number.parseFloat(match[0].replace(/,/g, ''));
   return Number.isFinite(value) && value > 0 ? value : null;
 }
 
-function findKey(value, key, depth = 0) {
-  if (!value || typeof value !== 'object' || depth > 9) return null;
-  if (Object.prototype.hasOwnProperty.call(value, key)) return value[key];
-
-  for (const child of Object.values(value)) {
-    const found = findKey(child, key, depth + 1);
-    if (found != null) return found;
-  }
+function detectCurrency(text) {
+  if (typeof text !== 'string') return null;
+  if (/\bAUD\b|AU\s?\$/i.test(text)) return 'AUD';
+  if (/\bUSD\b|US\s?\$/i.test(text)) return 'USD';
+  if (/\bNZD\b|NZ\s?\$/i.test(text)) return 'NZD';
+  if (/\bCAD\b|CA\s?\$/i.test(text)) return 'CAD';
+  if (/\bSGD\b|SG\s?\$/i.test(text)) return 'SGD';
+  if (/\bHKD\b|HK\s?\$/i.test(text)) return 'HKD';
+  if (/\bEUR\b|€/i.test(text)) return 'EUR';
+  if (/\bGBP\b|£/i.test(text)) return 'GBP';
   return null;
 }
 
@@ -90,16 +96,43 @@ async function pdpCall(data, token) {
   }
 }
 
+function priceMapFromResponse(response) {
+  const result = response?.data?.result;
+  if (!result || typeof result !== 'object') {
+    return { result: null, map: null, path: null };
+  }
+
+  const price = result.PRICE;
+  if (!price || typeof price !== 'object') {
+    return { result, map: null, path: null };
+  }
+
+  if (price.skuIdStrPriceInfoMap && typeof price.skuIdStrPriceInfoMap === 'object') {
+    return { result, map: price.skuIdStrPriceInfoMap, path: 'data.result.PRICE.skuIdStrPriceInfoMap' };
+  }
+
+  if (price.skuPriceInfoMap && typeof price.skuPriceInfoMap === 'object') {
+    return { result, map: price.skuPriceInfoMap, path: 'data.result.PRICE.skuPriceInfoMap' };
+  }
+
+  return { result, map: null, path: null };
+}
+
 function normalizeSkuMap(map) {
   if (!map || typeof map !== 'object') return [];
 
   return Object.entries(map).map(([skuId, entry]) => {
+    // salePriceString is the verified safe field. salePriceLocal can contain
+    // pipe-delimited components and must never be treated as one numeric string.
     const saleText = entry?.salePriceString
       || entry?.salePrice?.formattedAmount
       || entry?.salePrice?.formatedAmount
+      || entry?.salePriceLocal?.split?.('|', 1)?.[0]
       || '';
+
     const currency = entry?.originalPrice?.currency
       || entry?.salePrice?.currency
+      || detectCurrency(saleText)
       || null;
 
     return {
@@ -115,6 +148,10 @@ function normalizeSkuMap(map) {
   }).filter((sku) => sku.salePrice != null || sku.salePriceString);
 }
 
+function currenciesIn(skus) {
+  return [...new Set(skus.map((sku) => sku.currency).filter(Boolean))];
+}
+
 async function fetchSkuPrices(productId, senderUrl) {
   const prefs = await localePreferences(senderUrl);
   const data = JSON.stringify({
@@ -125,48 +162,77 @@ async function fetchSkuPrices(productId, senderUrl) {
     pdp_ext_f: '{}'
   });
 
-  let result = await pdpCall(data, await tokenFor());
-  const retText = String(result?.ret || '');
+  let response = await pdpCall(data, await tokenFor());
+  let retText = String(response?.ret || '');
 
   if (/TOKEN_(EMPTY|EXPIRED|EXOIRED)/i.test(retText)) {
-    result = await pdpCall(data, await tokenFor());
+    response = await pdpCall(data, await tokenFor());
+    retText = String(response?.ret || '');
   }
 
-  const finalRet = String(result?.ret || '');
-  if (!result || /PUNISH|VALIDATE|RGV587|FAIL_SYS/i.test(finalRet)) {
+  if (!response || /PUNISH|VALIDATE|RGV587|FAIL_SYS/i.test(retText)) {
     return {
       ok: false,
       productId: String(productId),
       prefs,
-      ret: finalRet || 'No response',
+      ret: retText || 'No response',
       error: 'AliExpress rejected the product-data request.'
     };
   }
 
-  const map = findKey(result, 'skuPriceInfoMap');
+  const { result, map, path } = priceMapFromResponse(response);
   const skus = normalizeSkuMap(map);
+
   if (!skus.length) {
     return {
       ok: false,
       productId: String(productId),
       prefs,
-      ret: finalRet,
-      error: 'Request succeeded, but no usable skuPriceInfoMap was found.'
+      ret: retText,
+      error: 'Request succeeded, but the expected PRICE SKU map was missing or empty.',
+      debug: { mapPath: path }
+    };
+  }
+
+  const apiCurrency = result?.GLOBAL_DATA?.globalData?.currencyCode || null;
+  const skuCurrencies = currenciesIn(skus);
+  const currencyMismatch = (apiCurrency && apiCurrency !== prefs.currency)
+    || skuCurrencies.some((currency) => currency !== prefs.currency);
+
+  if (currencyMismatch) {
+    return {
+      ok: false,
+      productId: String(productId),
+      prefs,
+      ret: retText,
+      error: `Currency mismatch: page requests ${prefs.currency}, API returned ${[apiCurrency, ...skuCurrencies].filter(Boolean).join(', ') || 'unknown'}.`,
+      debug: {
+        mapPath: path,
+        apiCurrency,
+        skuCurrencies,
+        samplePrices: skus.slice(0, 5).map(({ skuId, salePriceString, currency }) => ({ skuId, salePriceString, currency }))
+      }
     };
   }
 
   skus.sort((a, b) => (a.salePrice ?? Infinity) - (b.salePrice ?? Infinity));
   const numeric = skus.map((sku) => sku.salePrice).filter(Number.isFinite);
+  const target = result?.PRICE?.targetSkuPriceInfo || null;
 
   return {
     ok: true,
     productId: String(productId),
     prefs,
-    ret: finalRet,
+    ret: retText,
     count: skus.length,
     min: numeric.length ? Math.min(...numeric) : null,
     max: numeric.length ? Math.max(...numeric) : null,
-    skus
+    skus,
+    debug: {
+      mapPath: path,
+      apiCurrency,
+      targetSalePriceString: target?.salePriceString || target?.salePriceLocal || null
+    }
   };
 }
 
