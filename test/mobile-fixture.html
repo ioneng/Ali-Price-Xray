@@ -13,7 +13,7 @@
   </style>
   <script>
     Object.defineProperty(navigator, 'userAgent', {
-      value: `${navigator.userAgent} Android`,
+      value: `${navigator.userAgent} Android${new URLSearchParams(location.search).has('tablet') ? ' Tablet' : ' Mobile'}`,
       configurable: true
     });
 

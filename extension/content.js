@@ -4,6 +4,10 @@ const TAG = '[Ali-Price-Xray]';
 const log = (...args) => console.debug(TAG, ...args);
 const isMobileLayout = () => /Android/i.test(navigator.userAgent)
   || window.matchMedia('(max-width: 640px), (pointer: coarse)').matches;
+const isWideMobileLayout = () => isMobileLayout() && (
+  window.matchMedia('(orientation: landscape)').matches
+  || (/Android/i.test(navigator.userAgent) && !/\bMobile\b/i.test(navigator.userAgent))
+);
 
 function productIdFromHref(href) {
   if (!href) return null;
@@ -319,6 +323,7 @@ function renderPanel(card, result) {
   ensurePositioned(card);
 
   const mobile = isMobileLayout();
+  const wideMobile = isWideMobileLayout();
   const panel = document.createElement('div');
   panel.className = 'ali-price-xray-panel';
   panel.dataset.productId = String(result.productId);
@@ -329,10 +334,11 @@ function renderPanel(card, result) {
     zIndex: '2147483646',
     top: 'max(8px, env(safe-area-inset-top))',
     right: 'max(8px, env(safe-area-inset-right))',
-    bottom: 'max(8px, env(safe-area-inset-bottom))',
-    left: 'max(8px, env(safe-area-inset-left))',
-    width: 'auto',
-    maxHeight: 'none',
+    bottom: 'auto',
+    left: wideMobile ? 'auto' : 'max(8px, env(safe-area-inset-left))',
+    width: wideMobile ? '50vw' : 'auto',
+    maxWidth: wideMobile ? '50vw' : 'none',
+    maxHeight: 'calc(100dvh - 16px - env(safe-area-inset-top) - env(safe-area-inset-bottom))',
     overflow: 'auto',
     overscrollBehavior: 'contain',
     WebkitOverflowScrolling: 'touch',
