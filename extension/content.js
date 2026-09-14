@@ -2,7 +2,8 @@ const api = globalThis.browser ?? globalThis.chrome;
 const TAG = '[Ali-Price-Xray]';
 
 const log = (...args) => console.debug(TAG, ...args);
-const isMobileLayout = () => window.matchMedia('(max-width: 640px), (pointer: coarse)').matches;
+const isMobileLayout = () => /Android/i.test(navigator.userAgent)
+  || window.matchMedia('(max-width: 640px), (pointer: coarse)').matches;
 
 function productIdFromHref(href) {
   if (!href) return null;
@@ -126,8 +127,14 @@ function showImagePreview(url, label) {
   document.querySelector('.ali-price-xray-image-preview')?.remove();
 
   const mobile = isMobileLayout();
+  const previousFocus = document.activeElement instanceof HTMLElement
+    ? document.activeElement
+    : null;
   const overlay = document.createElement('div');
   overlay.className = 'ali-price-xray-image-preview';
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+  overlay.setAttribute('aria-label', label ? `${label} image preview` : 'SKU option image preview');
   Object.assign(overlay.style, {
     position: 'fixed',
     inset: '0',
@@ -136,18 +143,25 @@ function showImagePreview(url, label) {
     alignItems: 'center',
     justifyContent: 'center',
     boxSizing: 'border-box',
-    padding: mobile ? '12px' : '24px',
+    paddingTop: mobile ? 'max(12px, env(safe-area-inset-top))' : '24px',
+    paddingRight: mobile ? 'max(12px, env(safe-area-inset-right))' : '24px',
+    paddingBottom: mobile ? 'max(12px, env(safe-area-inset-bottom))' : '24px',
+    paddingLeft: mobile ? 'max(12px, env(safe-area-inset-left))' : '24px',
     background: 'rgba(0,0,0,.76)',
-    cursor: 'zoom-out'
+    cursor: 'zoom-out',
+    overscrollBehavior: 'contain'
   });
 
   const box = document.createElement('div');
   Object.assign(box.style, {
     width: mobile ? '100%' : 'auto',
     maxWidth: mobile ? '100%' : 'min(760px, 90vw)',
-    maxHeight: mobile ? 'calc(100vh - 24px)' : '90vh',
+    maxHeight: mobile ? 'calc(100dvh - 24px)' : '90vh',
     boxSizing: 'border-box',
     padding: mobile ? '8px' : '10px',
+    position: 'relative',
+    overflow: 'auto',
+    overscrollBehavior: 'contain',
     borderRadius: '12px',
     background: '#fff',
     boxShadow: '0 16px 50px rgba(0,0,0,.45)',
@@ -161,7 +175,7 @@ function showImagePreview(url, label) {
     display: 'block',
     maxWidth: '100%',
     width: mobile ? '100%' : 'auto',
-    maxHeight: mobile ? 'calc(100vh - 100px)' : '78vh',
+    maxHeight: mobile ? 'calc(100dvh - 112px)' : '78vh',
     objectFit: 'contain',
     margin: '0 auto'
   });
@@ -175,11 +189,45 @@ function showImagePreview(url, label) {
     textAlign: 'center'
   });
 
-  box.append(image, caption);
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.textContent = '×';
+  close.title = 'Close image preview';
+  close.setAttribute('aria-label', 'Close image preview');
+  Object.assign(close.style, {
+    position: 'absolute',
+    top: '8px',
+    right: '8px',
+    width: mobile ? '44px' : '32px',
+    height: mobile ? '44px' : '32px',
+    padding: '0',
+    border: '1px solid rgba(0,0,0,.18)',
+    borderRadius: '999px',
+    background: 'rgba(255,255,255,.94)',
+    color: '#333',
+    boxShadow: '0 1px 5px rgba(0,0,0,.22)',
+    font: mobile ? '26px/1 system-ui, sans-serif' : '20px/1 system-ui, sans-serif',
+    cursor: 'pointer',
+    touchAction: 'manipulation'
+  });
+
+  const closePreview = () => {
+    overlay.remove();
+    document.removeEventListener('keydown', onKeyDown, true);
+    previousFocus?.focus({ preventScroll: true });
+  };
+  const onKeyDown = (event) => {
+    if (event.key === 'Escape') closePreview();
+  };
+
+  box.append(image, caption, close);
   overlay.appendChild(box);
-  overlay.addEventListener('click', () => overlay.remove());
+  overlay.addEventListener('click', closePreview);
   box.addEventListener('click', (event) => event.stopPropagation());
+  close.addEventListener('click', closePreview);
+  document.addEventListener('keydown', onKeyDown, true);
   document.documentElement.appendChild(overlay);
+  close.focus({ preventScroll: true });
 }
 
 function createSkuRow(sku, currency, unavailable = false) {
@@ -203,6 +251,8 @@ function createSkuRow(sku, currency, unavailable = false) {
     thumb.alt = skuDisplayLabel(sku);
     thumb.loading = 'lazy';
     thumb.title = 'Tap to enlarge option image';
+    thumb.tabIndex = 0;
+    thumb.setAttribute('role', 'button');
     Object.assign(thumb.style, {
       width: `${thumbSize}px`,
       height: `${thumbSize}px`,
@@ -214,10 +264,14 @@ function createSkuRow(sku, currency, unavailable = false) {
       cursor: 'zoom-in',
       touchAction: 'manipulation'
     });
-    thumb.addEventListener('click', (event) => {
+    const openPreview = (event) => {
       event.preventDefault();
       event.stopPropagation();
       showImagePreview(imageUrl, skuDisplayLabel(sku));
+    };
+    thumb.addEventListener('click', openPreview);
+    thumb.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') openPreview(event);
     });
     thumb.addEventListener('error', () => thumb.remove());
     row.appendChild(thumb);
@@ -268,13 +322,15 @@ function renderPanel(card, result) {
   const panel = document.createElement('div');
   panel.className = 'ali-price-xray-panel';
   panel.dataset.productId = String(result.productId);
+  panel.setAttribute('role', 'dialog');
+  panel.setAttribute('aria-label', `Ali-Price-Xray product ${result.productId}`);
   Object.assign(panel.style, mobile ? {
     position: 'fixed',
     zIndex: '2147483646',
     top: 'max(8px, env(safe-area-inset-top))',
-    right: '8px',
+    right: 'max(8px, env(safe-area-inset-right))',
     bottom: 'max(8px, env(safe-area-inset-bottom))',
-    left: '8px',
+    left: 'max(8px, env(safe-area-inset-left))',
     width: 'auto',
     maxHeight: 'none',
     overflow: 'auto',
@@ -306,13 +362,32 @@ function renderPanel(card, result) {
     font: '12px/1.4 system-ui, sans-serif'
   });
 
+  const header = document.createElement('div');
+  Object.assign(header.style, {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    position: mobile ? 'sticky' : 'static',
+    top: mobile ? '-12px' : 'auto',
+    zIndex: '1',
+    margin: mobile ? '-12px -12px 8px' : '0 0 6px',
+    padding: mobile ? '8px 12px' : '0',
+    borderBottom: mobile ? '1px solid #eee' : '0',
+    background: mobile ? 'rgba(255,255,255,.99)' : 'transparent'
+  });
+
+  const title = document.createElement('div');
+  title.style.fontWeight = '700';
+  title.style.flex = '1';
+  title.style.minWidth = '0';
+  title.textContent = `Ali-Price-Xray · ${result.productId}`;
+
   const close = document.createElement('button');
   close.type = 'button';
   close.textContent = '×';
   close.title = 'Close';
   close.setAttribute('aria-label', 'Close Ali-Price-Xray');
   Object.assign(close.style, {
-    float: 'right',
     width: mobile ? '44px' : '28px',
     height: mobile ? '44px' : '28px',
     minWidth: mobile ? '44px' : '28px',
@@ -329,14 +404,8 @@ function renderPanel(card, result) {
     event.stopPropagation();
     panel.remove();
   });
-  panel.appendChild(close);
-
-  const title = document.createElement('div');
-  title.style.fontWeight = '700';
-  title.style.marginBottom = '6px';
-  title.style.paddingRight = mobile ? '48px' : '28px';
-  title.textContent = `Ali-Price-Xray · ${result.productId}`;
-  panel.appendChild(title);
+  header.append(title, close);
+  panel.appendChild(header);
 
   if (!result.ok) {
     const error = document.createElement('div');
