@@ -13,7 +13,7 @@
     "https://*.aliexpress.us/*"
   ],
   "background": {
-    "scripts": ["background.js"]
+    "scripts": ["background.js", "background-images.js"]
   },
   "content_scripts": [
     {
