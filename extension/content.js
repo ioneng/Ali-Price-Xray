@@ -298,7 +298,7 @@ function attachXray(card, productId, productUrl) {
   button.type = 'button';
   button.className = 'ali-price-xray-button';
   button.textContent = 'Xray';
-  button.title = 'Show all AliExpress SKU prices';
+  button.title = 'Show or hide AliExpress SKU prices';
   Object.assign(button.style, {
     position: 'absolute',
     zIndex: '2147483645',
@@ -317,6 +317,12 @@ function attachXray(card, productId, productUrl) {
   button.addEventListener('click', async (event) => {
     event.preventDefault();
     event.stopPropagation();
+
+    const openPanel = card.querySelector(':scope > .ali-price-xray-panel');
+    if (openPanel) {
+      openPanel.remove();
+      return;
+    }
 
     if (button.dataset.loading === '1') return;
     button.dataset.loading = '1';
