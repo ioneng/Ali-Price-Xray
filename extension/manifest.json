@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Ali-Price-Xray",
-  "version": "0.2.4",
+  "version": "0.3.0",
   "description": "Inspect the full AliExpress SKU price set behind search listings.",
   "permissions": [
     "cookies"
@@ -23,7 +23,7 @@
         "https://aliexpress.us/*",
         "https://*.aliexpress.us/*"
       ],
-      "js": ["content.js"],
+      "js": ["content.js", "content-sort.js"],
       "run_at": "document_idle"
     }
   ],
