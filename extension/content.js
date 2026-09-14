@@ -27,40 +27,67 @@ function productIdFromElement(root) {
     || null;
 }
 
+function hasVisiblePrice(root) {
+  const text = (root.innerText || root.textContent || '').replace(/\s+/g, ' ');
+  return /(?:AU\s?\$|US\s?\$|NZ\s?\$|CA\s?\$|SG\s?\$|HK\s?\$|£|€|\$)\s*\d[\d,.]*/i.test(text);
+}
+
+function distinctProductIds(root) {
+  const ids = new Set();
+  for (const link of root.querySelectorAll?.('a[href*="/item/"]') ?? []) {
+    const id = productIdFromHref(link.href);
+    if (id) ids.add(id);
+    if (ids.size > 1) break;
+  }
+  return ids;
+}
+
 function locateCard(link) {
   const wantedId = productIdFromHref(link.href);
-  let node = link;
-  let best = null;
+  if (!wantedId) return null;
 
-  for (let depth = 0; depth < 10 && node?.parentElement; depth += 1) {
+  let node = link;
+
+  // Current AliExpress search cards often use generated class names, so avoid
+  // depending on classes. The nearest useful card is the first ancestor that:
+  //   * is large enough to be a product tile,
+  //   * contains a product image,
+  //   * contains a visible localized price, and
+  //   * contains links for only this product id.
+  for (let depth = 0; depth < 14 && node?.parentElement; depth += 1) {
     node = node.parentElement;
     if (!node) break;
 
-    const ids = new Set();
-    for (const childLink of node.querySelectorAll('a[href*="/item/"]')) {
-      const id = productIdFromHref(childLink.href);
-      if (id) ids.add(id);
-      if (ids.size > 1) break;
+    const rect = node.getBoundingClientRect();
+    if (rect.width < 150 || rect.height < 160) continue;
+    if (!node.querySelector('img')) continue;
+    if (!hasVisiblePrice(node)) continue;
+
+    const ids = distinctProductIds(node);
+    if (ids.size === 1 && ids.has(wantedId)) {
+      return node;
     }
 
+    // Once we reach a container with multiple products we've climbed out of
+    // the individual card. Do not attach there.
     if (ids.size > 1) break;
-    if (ids.size === 1 && ids.has(wantedId) && node.querySelector('img')) {
-      const rect = node.getBoundingClientRect();
-      if (rect.width >= 120 && rect.height >= 120) best = node;
-    }
   }
 
-  return best || link.parentElement;
+  return null;
 }
 
 function candidateCards() {
-  const cards = new Set();
+  const byId = new Map();
+
   for (const link of document.querySelectorAll('a[href*="/item/"]')) {
-    if (!productIdFromHref(link.href)) continue;
+    const productId = productIdFromHref(link.href);
+    if (!productId || byId.has(productId)) continue;
+
     const card = locateCard(link);
-    if (card) cards.add(card);
+    if (card) byId.set(productId, card);
   }
-  return [...cards];
+
+  return [...byId.entries()].map(([productId, card]) => ({ productId, card }));
 }
 
 function money(value, currency) {
@@ -191,6 +218,7 @@ function attachXray(card, productId) {
 
   const button = document.createElement('button');
   button.type = 'button';
+  button.className = 'ali-price-xray-button';
   button.textContent = 'Xray';
   button.title = 'Show all AliExpress SKU prices';
   Object.assign(button.style, {
@@ -233,15 +261,45 @@ function attachXray(card, productId) {
   card.appendChild(button);
 }
 
+function ensureDebugBadge() {
+  let badge = document.getElementById('ali-price-xray-debug');
+  if (badge) return badge;
+
+  badge = document.createElement('div');
+  badge.id = 'ali-price-xray-debug';
+  Object.assign(badge.style, {
+    position: 'fixed',
+    zIndex: '2147483647',
+    right: '8px',
+    bottom: '8px',
+    padding: '4px 7px',
+    borderRadius: '6px',
+    background: 'rgba(20,20,20,.82)',
+    color: '#fff',
+    font: '11px/1.2 system-ui, sans-serif',
+    pointerEvents: 'none'
+  });
+  badge.textContent = 'Xray: scanning…';
+  document.documentElement.appendChild(badge);
+  return badge;
+}
+
 function scan() {
+  const badge = ensureDebugBadge();
+  const candidates = candidateCards();
   let attached = 0;
-  for (const card of candidateCards()) {
-    const productId = productIdFromElement(card);
+
+  for (const { productId, card } of candidates) {
     if (!productId || card.dataset.aliPriceXraySeen === productId) continue;
     attachXray(card, productId);
     attached += 1;
   }
-  if (attached) log(`attached to ${attached} cards`);
+
+  const buttons = document.querySelectorAll('.ali-price-xray-button').length;
+  badge.textContent = `Xray: ${buttons} card${buttons === 1 ? '' : 's'}`;
+  badge.style.background = buttons ? 'rgba(20,100,45,.88)' : 'rgba(150,25,25,.88)';
+
+  if (attached) log(`attached to ${attached} cards; ${buttons} total`);
 }
 
 let timer = 0;
