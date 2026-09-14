@@ -15,12 +15,10 @@ function productIdFromElement(root) {
     const own = productIdFromHref(root.href);
     if (own) return own;
   }
-
   for (const link of root.querySelectorAll?.('a[href*="/item/"]') ?? []) {
     const id = productIdFromHref(link.href);
     if (id) return id;
   }
-
   return root.getAttribute?.('data-product-id')
     || root.getAttribute?.('data-item-id')
     || root.getAttribute?.('data-id')
@@ -45,37 +43,29 @@ function distinctProductIds(root) {
 function locateCard(link) {
   const wantedId = productIdFromHref(link.href);
   if (!wantedId) return null;
-
   let node = link;
-
   for (let depth = 0; depth < 14 && node?.parentElement; depth += 1) {
     node = node.parentElement;
     if (!node) break;
-
     const rect = node.getBoundingClientRect();
     if (rect.width < 150 || rect.height < 160) continue;
     if (!node.querySelector('img')) continue;
     if (!hasVisiblePrice(node)) continue;
-
     const ids = distinctProductIds(node);
     if (ids.size === 1 && ids.has(wantedId)) return node;
     if (ids.size > 1) break;
   }
-
   return null;
 }
 
 function candidateCards() {
   const byId = new Map();
-
   for (const link of document.querySelectorAll('a[href*="/item/"]')) {
     const productId = productIdFromHref(link.href);
     if (!productId || byId.has(productId)) continue;
-
     const card = locateCard(link);
     if (card) byId.set(productId, { card, productUrl: link.href });
   }
-
   return [...byId.entries()].map(([productId, value]) => ({
     productId,
     card: value.card,
@@ -110,27 +100,113 @@ function skuDisplayLabel(sku) {
         return hash >= 0 ? part.slice(hash + 1).trim() : '';
       })
       .filter(Boolean);
-
     if (labels.length) return labels.join(' · ');
   }
-
   const rawPath = String(sku?.skuPath || '').trim();
   if (rawPath) return `path ${rawPath}`;
-
   return `SKU ${sku?.skuId || '?'}`;
+}
+
+function normalizedImageUrl(url) {
+  if (typeof url !== 'string' || !url.trim()) return null;
+  if (url.startsWith('//')) return `https:${url}`;
+  return url;
+}
+
+function showImagePreview(url, label) {
+  const src = normalizedImageUrl(url);
+  if (!src) return;
+  document.querySelector('.ali-price-xray-image-preview')?.remove();
+
+  const overlay = document.createElement('div');
+  overlay.className = 'ali-price-xray-image-preview';
+  Object.assign(overlay.style, {
+    position: 'fixed',
+    inset: '0',
+    zIndex: '2147483647',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '24px',
+    background: 'rgba(0,0,0,.72)',
+    cursor: 'zoom-out'
+  });
+
+  const box = document.createElement('div');
+  Object.assign(box.style, {
+    maxWidth: 'min(760px, 90vw)',
+    maxHeight: '90vh',
+    padding: '10px',
+    borderRadius: '12px',
+    background: '#fff',
+    boxShadow: '0 16px 50px rgba(0,0,0,.45)',
+    cursor: 'default'
+  });
+
+  const image = document.createElement('img');
+  image.src = src;
+  image.alt = label || 'SKU option image';
+  Object.assign(image.style, {
+    display: 'block',
+    maxWidth: 'min(720px, 86vw)',
+    maxHeight: '78vh',
+    objectFit: 'contain',
+    margin: '0 auto'
+  });
+
+  const caption = document.createElement('div');
+  caption.textContent = label || 'SKU option';
+  Object.assign(caption.style, {
+    marginTop: '8px',
+    color: '#222',
+    font: '12px/1.35 system-ui, sans-serif',
+    textAlign: 'center'
+  });
+
+  box.append(image, caption);
+  overlay.appendChild(box);
+  overlay.addEventListener('click', () => overlay.remove());
+  box.addEventListener('click', (event) => event.stopPropagation());
+  document.documentElement.appendChild(overlay);
 }
 
 function createSkuRow(sku, currency, unavailable = false) {
   const row = document.createElement('div');
+  const imageUrl = normalizedImageUrl(sku.imageUrl);
   Object.assign(row.style, {
     display: 'grid',
-    gridTemplateColumns: 'minmax(0, 1fr) auto',
+    gridTemplateColumns: imageUrl ? '48px minmax(0, 1fr) auto' : 'minmax(0, 1fr) auto',
     gap: '8px',
     padding: '7px 0',
     borderTop: '1px solid #eee',
-    alignItems: 'start',
+    alignItems: 'center',
     opacity: unavailable ? '0.58' : '1'
   });
+
+  if (imageUrl) {
+    const thumb = document.createElement('img');
+    thumb.src = imageUrl;
+    thumb.alt = skuDisplayLabel(sku);
+    thumb.loading = 'lazy';
+    thumb.title = 'Click to enlarge option image';
+    Object.assign(thumb.style, {
+      width: '46px',
+      height: '46px',
+      boxSizing: 'border-box',
+      objectFit: 'contain',
+      border: '1px solid #ddd',
+      borderRadius: '6px',
+      background: '#fff',
+      cursor: 'zoom-in'
+    });
+    thumb.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      showImagePreview(imageUrl, skuDisplayLabel(sku));
+    });
+    thumb.addEventListener('error', () => thumb.remove());
+    row.appendChild(thumb);
+  }
 
   const left = document.createElement('div');
   left.style.minWidth = '0';
@@ -177,8 +253,8 @@ function renderPanel(card, result) {
     zIndex: '2147483646',
     top: '36px',
     right: '6px',
-    width: 'min(410px, calc(100% - 12px))',
-    maxHeight: '440px',
+    width: 'min(430px, calc(100% - 12px))',
+    maxHeight: '460px',
     overflow: 'auto',
     boxSizing: 'border-box',
     padding: '10px',
@@ -220,14 +296,12 @@ function renderPanel(card, result) {
     error.style.color = '#a40000';
     error.textContent = result.error || 'SKU request failed.';
     panel.appendChild(error);
-
     if (result.ret) {
       const ret = document.createElement('pre');
       ret.textContent = result.ret;
       Object.assign(ret.style, { whiteSpace: 'pre-wrap', margin: '8px 0 0', fontSize: '10px' });
       panel.appendChild(ret);
     }
-
     card.appendChild(panel);
     return;
   }
@@ -261,15 +335,12 @@ function renderPanel(card, result) {
   const unavailable = result.skus.filter((sku) => sku.salable === false);
 
   const mainList = document.createElement('div');
-  for (const sku of [...available, ...unknown]) {
-    mainList.appendChild(createSkuRow(sku, currency, false));
-  }
+  for (const sku of [...available, ...unknown]) mainList.appendChild(createSkuRow(sku, currency, false));
   panel.appendChild(mainList);
 
   if (unavailable.length) {
     const details = document.createElement('details');
     details.style.marginTop = '8px';
-
     const summaryToggle = document.createElement('summary');
     summaryToggle.textContent = `${unavailable.length} unavailable backend SKU${unavailable.length === 1 ? '' : 's'}`;
     Object.assign(summaryToggle.style, {
@@ -279,7 +350,6 @@ function renderPanel(card, result) {
       userSelect: 'none'
     });
     details.appendChild(summaryToggle);
-
     const soldOutList = document.createElement('div');
     for (const sku of unavailable) soldOutList.appendChild(createSkuRow(sku, currency, true));
     details.appendChild(soldOutList);
@@ -330,11 +400,7 @@ function attachXray(card, productId, productUrl) {
     button.textContent = '…';
 
     try {
-      const result = await api.runtime.sendMessage({
-        type: 'xray:fetch-skus',
-        productId,
-        productUrl
-      });
+      const result = await api.runtime.sendMessage({ type: 'xray:fetch-skus', productId, productUrl });
       log('SKU result', result);
       renderPanel(card, result || { ok: false, productId, error: 'No response from extension background.' });
     } catch (error) {
@@ -352,7 +418,6 @@ function attachXray(card, productId, productUrl) {
 function ensureDebugBadge() {
   let badge = document.getElementById('ali-price-xray-debug');
   if (badge) return badge;
-
   badge = document.createElement('div');
   badge.id = 'ali-price-xray-debug';
   Object.assign(badge.style, {
@@ -376,17 +441,14 @@ function scan() {
   const badge = ensureDebugBadge();
   const candidates = candidateCards();
   let attached = 0;
-
   for (const { productId, card, productUrl } of candidates) {
     if (!productId || card.dataset.aliPriceXraySeen === productId) continue;
     attachXray(card, productId, productUrl);
     attached += 1;
   }
-
   const buttons = document.querySelectorAll('.ali-price-xray-button').length;
   badge.textContent = `Xray: ${buttons} card${buttons === 1 ? '' : 's'}`;
   badge.style.background = buttons ? 'rgba(20,100,45,.88)' : 'rgba(150,25,25,.88)';
-
   if (attached) log(`attached to ${attached} cards; ${buttons} total`);
 }
 
@@ -396,10 +458,6 @@ function scheduleScan() {
   timer = window.setTimeout(scan, 150);
 }
 
-new MutationObserver(scheduleScan).observe(document.documentElement, {
-  childList: true,
-  subtree: true
-});
-
+new MutationObserver(scheduleScan).observe(document.documentElement, { childList: true, subtree: true });
 scan();
 log('content script loaded', location.href);
