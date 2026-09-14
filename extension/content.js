@@ -318,12 +318,16 @@ function createSkuRow(sku, currency, unavailable = false) {
   return row;
 }
 
-function renderPanel(card, result) {
+function renderPanel(card, result, anchor) {
   removePanel(card, result.productId);
   ensurePositioned(card);
 
   const mobile = isMobileLayout();
   const wideMobile = isWideMobileLayout();
+  const anchorRect = anchor?.getBoundingClientRect();
+  const anchorOnLeft = wideMobile
+    && Number.isFinite(anchorRect?.left)
+    && anchorRect.left + (anchorRect.width / 2) < window.innerWidth / 2;
   const panel = document.createElement('div');
   panel.className = 'ali-price-xray-panel';
   panel.dataset.productId = String(result.productId);
@@ -333,9 +337,9 @@ function renderPanel(card, result) {
     position: 'fixed',
     zIndex: '2147483646',
     top: 'max(8px, env(safe-area-inset-top))',
-    right: 'max(8px, env(safe-area-inset-right))',
+    right: wideMobile && anchorOnLeft ? 'auto' : 'max(8px, env(safe-area-inset-right))',
     bottom: 'auto',
-    left: wideMobile ? 'auto' : 'max(8px, env(safe-area-inset-left))',
+    left: wideMobile && !anchorOnLeft ? 'auto' : 'max(8px, env(safe-area-inset-left))',
     width: wideMobile ? '50vw' : 'auto',
     maxWidth: wideMobile ? '50vw' : 'none',
     maxHeight: 'calc(100dvh - 16px - env(safe-area-inset-top) - env(safe-area-inset-bottom))',
@@ -541,10 +545,10 @@ function attachXray(card, productId, productUrl) {
     try {
       const result = await api.runtime.sendMessage({ type: 'xray:fetch-skus', productId, productUrl });
       log('SKU result', result);
-      renderPanel(card, result || { ok: false, productId, error: 'No response from extension background.' });
+      renderPanel(card, result || { ok: false, productId, error: 'No response from extension background.' }, button);
     } catch (error) {
       log('SKU request error', error);
-      renderPanel(card, { ok: false, productId, error: error?.message || String(error) });
+      renderPanel(card, { ok: false, productId, error: error?.message || String(error) }, button);
     } finally {
       button.dataset.loading = '0';
       button.textContent = previous;

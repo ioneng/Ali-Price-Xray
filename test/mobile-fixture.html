@@ -10,10 +10,17 @@
     .card { width: 100%; min-height: 620px; padding: 12px; background: #fff; }
     .product-image { display: block; width: 100%; height: 300px; background: #ddd; }
     .price { display: block; margin-top: 12px; font-size: 22px; }
+    @media (orientation: landscape), (min-width: 600px) {
+      html[data-side="left"] .card,
+      html[data-side="right"] .card { width: 50%; }
+      html[data-side="right"] .card { margin-left: auto; }
+    }
   </style>
   <script>
+    const fixtureParams = new URLSearchParams(location.search);
+    document.documentElement.dataset.side = fixtureParams.get('side') || 'right';
     Object.defineProperty(navigator, 'userAgent', {
-      value: `${navigator.userAgent} Android${new URLSearchParams(location.search).has('tablet') ? ' Tablet' : ' Mobile'}`,
+      value: `${navigator.userAgent} Android${fixtureParams.has('tablet') ? ' Tablet' : ' Mobile'}`,
       configurable: true
     });
 
@@ -47,11 +54,6 @@
       }
     };
 
-    const originalRect = Element.prototype.getBoundingClientRect;
-    Element.prototype.getBoundingClientRect = function getFixtureRect() {
-      if (this.closest?.('.card')) return { width: 350, height: 620, top: 0, right: 350, bottom: 620, left: 0 };
-      return originalRect.call(this);
-    };
   </script>
 </head>
 <body>
