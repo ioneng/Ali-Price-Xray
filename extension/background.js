@@ -33,6 +33,46 @@ function detectCurrency(text) {
   return null;
 }
 
+function formattedAmount(price) {
+  if (!price) return null;
+  if (typeof price === 'string') return price;
+  if (typeof price !== 'object') return null;
+  return price.formattedAmount
+    || price.formatedAmount
+    || (price.value != null ? String(price.value) : null);
+}
+
+function effectivePrice(entry) {
+  if (!entry || typeof entry !== 'object') {
+    return { text: null, value: null, currency: null, source: null };
+  }
+
+  // Current AliExpress sale events commonly put the actually displayed product-page
+  // price in warmUpPrice. Prefer it before the ordinary sale price.
+  const warmText = formattedAmount(entry.warmUpPrice);
+  if (warmText) {
+    return {
+      text: warmText,
+      value: parsePrice(warmText) ?? parsePrice(entry.warmUpPrice?.value),
+      currency: entry.warmUpPrice?.currency || detectCurrency(warmText) || null,
+      source: 'warmUpPrice'
+    };
+  }
+
+  const saleObjectText = formattedAmount(entry.salePrice);
+  const saleText = saleObjectText
+    || entry.salePriceString
+    || entry.salePriceLocal?.split?.('|', 1)?.[0]
+    || null;
+
+  return {
+    text: saleText,
+    value: parsePrice(saleText),
+    currency: entry.salePrice?.currency || detectCurrency(saleText) || null,
+    source: saleObjectText ? 'salePrice' : (entry.salePriceString ? 'salePriceString' : 'salePriceLocal')
+  };
+}
+
 async function tokenFor() {
   try {
     const cookie = await api.cookies.get({ url: PDP_HOST, name: '_m_h5_tk' });
@@ -118,32 +158,47 @@ function priceMapFromResponse(response) {
   return { result, map: null, path: null };
 }
 
-function normalizeSkuMap(map) {
+function activeSkuEntries(result, map) {
   if (!map || typeof map !== 'object') return [];
 
-  return Object.entries(map).map(([skuId, entry]) => {
-    // salePriceString is the verified safe field. salePriceLocal can contain
-    // pipe-delimited components and must never be treated as one numeric string.
-    const saleText = entry?.salePriceString
-      || entry?.salePrice?.formattedAmount
-      || entry?.salePrice?.formatedAmount
-      || entry?.salePriceLocal?.split?.('|', 1)?.[0]
-      || '';
+  const rawPaths = result?.SKU?.skuPaths;
+  const paths = Array.isArray(rawPaths)
+    ? rawPaths
+    : (rawPaths && typeof rawPaths === 'object' ? Object.values(rawPaths) : []);
 
-    const currency = entry?.originalPrice?.currency
-      || entry?.salePrice?.currency
-      || detectCurrency(saleText)
+  if (paths.length) {
+    return paths.map((path) => {
+      const skuId = String(path?.skuIdStr ?? path?.skuId ?? '').trim();
+      if (!skuId) return null;
+      const entry = map[skuId] || map[String(path?.skuId)] || null;
+      if (!entry) return null;
+      return { skuId, entry, path };
+    }).filter(Boolean);
+  }
+
+  // Fallback for listings whose response omits skuPaths.
+  return Object.entries(map).map(([skuId, entry]) => ({ skuId, entry, path: null }));
+}
+
+function normalizeSkuEntries(entries) {
+  return entries.map(({ skuId, entry, path }) => {
+    const current = effectivePrice(entry);
+    const currency = current.currency
+      || entry?.originalPrice?.currency
       || null;
 
     return {
       skuId,
-      salePrice: parsePrice(saleText),
-      salePriceString: saleText || null,
+      salePrice: current.value,
+      salePriceString: current.text,
+      priceSource: current.source,
       currency,
       discount: entry?.discount || null,
       originalPriceString: entry?.originalPrice?.formatedAmount
         || entry?.originalPrice?.formattedAmount
-        || null
+        || null,
+      skuPath: path?.path || null,
+      skuAttr: path?.skuAttr || null
     };
   }).filter((sku) => sku.salePrice != null || sku.salePriceString);
 }
@@ -181,7 +236,8 @@ async function fetchSkuPrices(productId, senderUrl) {
   }
 
   const { result, map, path } = priceMapFromResponse(response);
-  const skus = normalizeSkuMap(map);
+  const activeEntries = activeSkuEntries(result, map);
+  const skus = normalizeSkuEntries(activeEntries);
 
   if (!skus.length) {
     return {
@@ -189,8 +245,14 @@ async function fetchSkuPrices(productId, senderUrl) {
       productId: String(productId),
       prefs,
       ret: retText,
-      error: 'Request succeeded, but the expected PRICE SKU map was missing or empty.',
-      debug: { mapPath: path }
+      error: 'Request succeeded, but no active SKU prices could be joined to SKU paths.',
+      debug: {
+        mapPath: path,
+        priceMapCount: map && typeof map === 'object' ? Object.keys(map).length : 0,
+        skuPathCount: Array.isArray(result?.SKU?.skuPaths)
+          ? result.SKU.skuPaths.length
+          : Object.keys(result?.SKU?.skuPaths || {}).length
+      }
     };
   }
 
@@ -210,7 +272,7 @@ async function fetchSkuPrices(productId, senderUrl) {
         mapPath: path,
         apiCurrency,
         skuCurrencies,
-        samplePrices: skus.slice(0, 5).map(({ skuId, salePriceString, currency }) => ({ skuId, salePriceString, currency }))
+        samplePrices: skus.slice(0, 5).map(({ skuId, salePriceString, currency, priceSource }) => ({ skuId, salePriceString, currency, priceSource }))
       }
     };
   }
@@ -218,6 +280,7 @@ async function fetchSkuPrices(productId, senderUrl) {
   skus.sort((a, b) => (a.salePrice ?? Infinity) - (b.salePrice ?? Infinity));
   const numeric = skus.map((sku) => sku.salePrice).filter(Number.isFinite);
   const target = result?.PRICE?.targetSkuPriceInfo || null;
+  const targetEffective = effectivePrice(target);
 
   return {
     ok: true,
@@ -231,7 +294,10 @@ async function fetchSkuPrices(productId, senderUrl) {
     debug: {
       mapPath: path,
       apiCurrency,
-      targetSalePriceString: target?.salePriceString || target?.salePriceLocal || null
+      priceMapCount: map && typeof map === 'object' ? Object.keys(map).length : 0,
+      activeSkuCount: activeEntries.length,
+      targetPriceString: targetEffective.text,
+      targetPriceSource: targetEffective.source
     }
   };
 }
