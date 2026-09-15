@@ -134,4 +134,53 @@ xrayRefreshSkuHighlights = function xrayRefreshGroupedSkuHighlights() {
   }
 };
 
+xrayAddPanelControls = function xrayAddPanelControlsStacked(panel, result) {
+  if (!panel || !result?.ok || panel.querySelector('.ali-price-xray-sort-controls')) return;
+  const controls = document.createElement('div');
+  controls.className = 'ali-price-xray-sort-controls';
+  Object.assign(controls.style, {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
+    alignItems: 'stretch',
+    margin: '8px 0 10px',
+    padding: '8px',
+    borderRadius: '8px',
+    background: '#f6f7f8'
+  });
+
+  const hint = document.createElement('div');
+  hint.textContent = 'Select one or more comparable options. Matching uses option text plus attached images.';
+  Object.assign(hint.style, {
+    color: '#444',
+    fontSize: isMobileLayout() ? '12px' : '10px'
+  });
+
+  const sort = document.createElement('button');
+  sort.type = 'button';
+  sort.className = 'ali-price-xray-sort-button';
+  Object.assign(sort.style, {
+    alignSelf: 'center',
+    minHeight: isMobileLayout() ? '44px' : '30px',
+    padding: '6px 10px',
+    border: '1px solid rgba(0,0,0,.25)',
+    borderRadius: '8px',
+    background: '#fff',
+    color: '#111',
+    fontWeight: '700',
+    cursor: 'pointer',
+    touchAction: 'manipulation'
+  });
+  sort.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    xraySortAllCards();
+  });
+
+  controls.append(hint, sort);
+  const firstSkuList = [...panel.children].find((child) => child.querySelector?.('[data-xray-sku-id]'));
+  panel.insertBefore(controls, firstSkuList || null);
+  xraySyncReferenceControls();
+};
+
 log('reference SKU sorter runtime fallbacks loaded');
