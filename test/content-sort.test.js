@@ -70,3 +70,29 @@ test('dHash comparison reports identical hashes as exact match', () => {
   assert.equal(context.xrayHammingSimilarity('0101', '0101'), 1);
   assert.equal(context.xrayHammingSimilarity('0000', '1111'), 0);
 });
+
+test('keeps the best candidate for each selected reference', async () => {
+  const context = loadMatcher();
+  context.xraySetReference('source', { skuId: 'ref-a', label: '2C23T Standard' }, true);
+  context.xraySetReference('source', { skuId: 'ref-b', label: '2C53T Standard' }, true);
+
+  const match = await context.xrayBestSkuForResult({
+    skus: [
+      { skuId: 'sku-a', label: '2C23T Standard', salePrice: 82.4, salable: true },
+      { skuId: 'sku-b', label: '2C53T Standard', salePrice: 107.77, salable: true }
+    ]
+  });
+
+  assert.equal(match.referenceMatches.length, 2);
+  const byReference = new Map(match.referenceMatches.map((item) => [item.reference.skuId, item.sku.skuId]));
+  assert.equal(byReference.get('ref-a'), 'sku-a');
+  assert.equal(byReference.get('ref-b'), 'sku-b');
+});
+
+test('recognizes a raw SKU inside a visible grouped row', () => {
+  const context = loadMatcher();
+  assert.equal(context.xraySkuContainsSkuId({
+    skuId: 'representative',
+    xrayVisibleGroup: { skuIds: ['raw-a', 'raw-b'] }
+  }, 'raw-b'), true);
+});
