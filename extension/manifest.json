@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Ali-Price-Xray",
-  "version": "0.2.4",
+  "version": "0.3.0",
   "description": "Inspect the full AliExpress SKU price set behind search listings.",
   "permissions": [
     "cookies"
@@ -10,10 +10,12 @@
     "https://aliexpress.com/*",
     "https://*.aliexpress.com/*",
     "https://aliexpress.us/*",
-    "https://*.aliexpress.us/*"
+    "https://*.aliexpress.us/*",
+    "https://*.alicdn.com/*",
+    "https://*.aliexpress-media.com/*"
   ],
   "background": {
-    "scripts": ["background.js", "background-images.js"]
+    "scripts": ["background.js", "background-images.js", "background-sort.js"]
   },
   "content_scripts": [
     {
@@ -23,7 +25,7 @@
         "https://aliexpress.us/*",
         "https://*.aliexpress.us/*"
       ],
-      "js": ["content.js"],
+      "js": ["content-sku-groups.js", "content.js", "content-sort.js", "content-sort-runtime.js"],
       "run_at": "document_idle"
     }
   ],

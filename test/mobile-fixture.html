@@ -37,18 +37,20 @@
           ok: true,
           productId: '1005000000000000',
           prefs: { country: 'AU', currency: 'AUD', source: 'mobile fixture' },
-          count: 5,
-          saleableCount: 4,
+          count: 7,
+          saleableCount: 5,
           min: 25.79,
           max: 63.99,
           targetPriceString: 'AU$25.79',
           debug: { contextFields: ['pdp_ext_f', 'pdpNPI'] },
           skus: [
-            { skuId: '1', skuAttr: '14:1#Tips only', salePrice: 25.79, salePriceString: 'AU$25.79', salable: true, stock: 8, imageUrl: optionImage('Tips', '#e0a800') },
-            { skuId: '2', skuAttr: '14:2#HS-02A iron', salePrice: 42.99, salePriceString: 'AU$42.99', salable: true, stock: 28, imageUrl: optionImage('Iron', '#2374ab') },
+            { skuId: '1', skuAttr: '14:1#Tips only', skuPath: '14:1', salePrice: 25.79, salePriceString: 'AU$25.79', salable: true, stock: 8, imageUrl: optionImage('Tips', '#e0a800') },
+            { skuId: '2', skuAttr: '200007763:AU;14:2#HS-02A iron', skuPath: '14:2;200007763:AU', salePrice: 42.99, salePriceString: 'AU$42.99', salable: true, stock: 28, imageUrl: optionImage('Iron', '#2374ab') },
             { skuId: '3', skuAttr: '14:3#100W US-C2C', salePrice: 50.69, salePriceString: 'AU$50.69', salable: true, stock: 28, imageUrl: optionImage('US', '#555') },
             { skuId: '4', skuAttr: '14:4#100W EU-C2C', salePrice: 50.69, salePriceString: 'AU$50.69', salable: true, stock: 28, imageUrl: optionImage('EU', '#555') },
-            { skuId: '5', skuAttr: '14:5#Unavailable kit', salePrice: 63.99, salePriceString: 'AU$63.99', salable: false, stock: 0, imageUrl: optionImage('Kit', '#777') }
+            { skuId: '5', skuAttr: '14:5#Unavailable kit', salePrice: 63.99, salePriceString: 'AU$63.99', salable: false, stock: 0, imageUrl: optionImage('Kit', '#777') },
+            { skuId: '6', skuAttr: '200007763:US;14:2#HS-02A iron', skuPath: '14:2;200007763:US', salePrice: 44.99, salePriceString: 'AU$44.99', salable: true, stock: 12, imageUrl: optionImage('Iron', '#2374ab') },
+            { skuId: '7', skuAttr: '200007763:EU;14:2#HS-02A iron', skuPath: '14:2;200007763:EU', salePrice: 42.99, salePriceString: 'AU$42.99', salable: false, stock: 0, imageUrl: optionImage('Iron', '#2374ab') }
           ]
         })
       }
@@ -64,7 +66,10 @@
       <span class="price">AU$25.79</span>
     </a>
   </article>
+  <script src="../extension/content-sku-groups.js"></script>
   <script src="../extension/content.js"></script>
+  <script src="../extension/content-sort.js"></script>
+  <script src="../extension/content-sort-runtime.js"></script>
   <script>
     document.querySelector('.ali-price-xray-button')?.click();
     setTimeout(() => {
