@@ -48,7 +48,7 @@ xrayApplyCardOrdering = function xrayApplyCardOrderingRobust(matches) {
   for (const group of parentGroups.values()) {
     group.forEach(({ matchItem, sortableItem }, index) => {
       const rank = rankByProduct.get(String(matchItem.candidate.productId));
-      sortableItem.style.order = String(rank ? rank : 10000 + index);
+      sortableItem.style.order = String(rank ? rank - 10000 : 10000 + index);
     });
   }
 
