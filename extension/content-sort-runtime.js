@@ -61,4 +61,77 @@ xrayApplyCardOrdering = function xrayApplyCardOrderingRobust(matches) {
   return confident.length;
 };
 
+function xraySortReferenceKeysForSku(productId, sku) {
+  const keys = new Set();
+  const ownKey = xrayReferenceKey(productId, sku?.skuId);
+  if (xraySortState.references.has(ownKey)) keys.add(ownKey);
+
+  const matchItem = xraySortState.lastMatches.get(String(productId || ''));
+  for (const match of matchItem?.match?.referenceMatches || []) {
+    const referenceKey = match.reference?.key;
+    if (!referenceKey || !xraySortState.references.has(referenceKey)) continue;
+    if (match.score < XRAY_SORT_MIN_CONFIDENCE) continue;
+    if (!xraySkuContainsSkuId(sku, match.sku?.skuId)) continue;
+    keys.add(referenceKey);
+  }
+  return [...keys];
+}
+
+function xraySortReferenceKeysForRow(row) {
+  return xraySortReferenceKeysForSku(row?.dataset?.xrayProductId, row?.__xraySku);
+}
+
+xraySetReference = function xraySetReferenceGrouped(productId, sku, selected) {
+  const key = xrayReferenceKey(productId, sku.skuId);
+  if (selected) {
+    xraySortState.references.set(key, {
+      key,
+      productId: String(productId),
+      skuId: String(sku.skuId),
+      label: skuDisplayLabel(sku),
+      imageUrl: normalizedImageUrl(sku.imageUrl)
+    });
+  } else {
+    const groupKeys = xraySortReferenceKeysForSku(productId, sku);
+    if (groupKeys.length) {
+      for (const groupKey of groupKeys) xraySortState.references.delete(groupKey);
+    } else {
+      xraySortState.references.delete(key);
+    }
+  }
+  xraySyncReferenceControls();
+  xrayRefreshSkuHighlights();
+};
+
+xraySyncReferenceControls = function xraySyncGroupedReferenceControls() {
+  for (const checkbox of document.querySelectorAll('.ali-price-xray-reference-checkbox')) {
+    const row = checkbox.closest?.('[data-xray-sku-id]');
+    const groupKeys = row ? xraySortReferenceKeysForRow(row) : [];
+    checkbox.checked = groupKeys.length > 0;
+    const color = groupKeys.length ? xrayReferenceColor(groupKeys[0]) : null;
+    checkbox.style.accentColor = color?.solid || '';
+  }
+
+  const count = xraySortState.references.size;
+  for (const button of document.querySelectorAll('.ali-price-xray-sort-button')) {
+    button.disabled = !count || xraySortState.sorting;
+    button.textContent = xraySortState.sorting
+      ? 'Matching…'
+      : (count ? `Sort by ${count} selected` : 'Select SKU(s) to sort');
+  }
+};
+
+xrayRefreshSkuHighlights = function xrayRefreshGroupedSkuHighlights() {
+  for (const row of document.querySelectorAll('[data-xray-sku-id]')) {
+    const groupKeys = xraySortReferenceKeysForRow(row);
+    const colors = groupKeys.map((key) => xrayReferenceColor(key)).filter(Boolean);
+    const checkbox = row.querySelector('.ali-price-xray-reference-checkbox');
+    if (checkbox) {
+      checkbox.checked = groupKeys.length > 0;
+      checkbox.style.accentColor = colors[0]?.solid || '';
+    }
+    xrayApplySkuHighlight(row, colors);
+  }
+};
+
 log('reference SKU sorter runtime fallbacks loaded');
