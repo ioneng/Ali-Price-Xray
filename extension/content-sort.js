@@ -5,6 +5,14 @@
 const XRAY_SORT_MIN_CONFIDENCE = 0.58;
 const XRAY_SORT_MAX_HASH_CANDIDATES = 6;
 const XRAY_SORT_FETCH_CONCURRENCY = 3;
+const XRAY_SORT_REFERENCE_COLORS = [
+  { solid: '#2563eb', tint: 'rgba(37,99,235,.10)' },
+  { solid: '#d97706', tint: 'rgba(217,119,6,.10)' },
+  { solid: '#7c3aed', tint: 'rgba(124,58,237,.10)' },
+  { solid: '#059669', tint: 'rgba(5,150,105,.10)' },
+  { solid: '#dc2626', tint: 'rgba(220,38,38,.10)' },
+  { solid: '#0891b2', tint: 'rgba(8,145,178,.10)' }
+];
 
 const xraySortState = {
   references: new Map(),
@@ -16,6 +24,12 @@ const xraySortState = {
 
 function xrayReferenceKey(productId, skuId) {
   return `${productId}:${skuId}`;
+}
+
+function xrayReferenceColor(referenceOrKey) {
+  const key = typeof referenceOrKey === 'string' ? referenceOrKey : referenceOrKey?.key;
+  const index = [...xraySortState.references.keys()].indexOf(key);
+  return index >= 0 ? XRAY_SORT_REFERENCE_COLORS[index % XRAY_SORT_REFERENCE_COLORS.length] : null;
 }
 
 function xrayNormalizeText(value) {
@@ -226,15 +240,70 @@ async function xrayBestSkuForResult(result) {
   }
 
   let bestMatch = null;
+  const bestByReference = new Map();
   for (const row of cheapRows) {
     for (const reference of references) {
       const scored = await xrayScoreSkuAgainstReference(reference, row.sku, pixelCandidates.has(row.sku));
-      if (!bestMatch || scored.score > bestMatch.score) {
-        bestMatch = { sku: row.sku, reference, ...scored };
-      }
+      const candidate = { sku: row.sku, reference, ...scored };
+      if (!bestMatch || scored.score > bestMatch.score) bestMatch = candidate;
+      const referenceBest = bestByReference.get(reference.key);
+      if (!referenceBest || scored.score > referenceBest.score) bestByReference.set(reference.key, candidate);
     }
   }
-  return bestMatch;
+
+  return bestMatch ? {
+    ...bestMatch,
+    referenceMatches: references.map((reference) => bestByReference.get(reference.key)).filter(Boolean)
+  } : null;
+}
+
+function xraySkuContainsSkuId(sku, skuId) {
+  const wanted = String(skuId || '');
+  if (!wanted) return false;
+  if (String(sku?.skuId || '') === wanted) return true;
+  return (sku?.xrayVisibleGroup?.skuIds || []).some((id) => String(id) === wanted);
+}
+
+function xrayApplySkuHighlight(row, colors) {
+  row.style.backgroundColor = '';
+  row.style.backgroundImage = '';
+  if (!colors.length) return;
+
+  const stripeWidth = 4;
+  const stops = [];
+  colors.forEach((color, index) => {
+    const start = index * stripeWidth;
+    const end = start + stripeWidth;
+    stops.push(`${color.solid} ${start}px`, `${color.solid} ${end}px`);
+  });
+  stops.push(`transparent ${colors.length * stripeWidth}px`);
+  row.style.backgroundColor = colors[0].tint;
+  row.style.backgroundImage = `linear-gradient(to right, ${stops.join(', ')})`;
+}
+
+function xrayRefreshSkuHighlights() {
+  for (const row of document.querySelectorAll('[data-xray-sku-id]')) {
+    const checkbox = row.querySelector('.ali-price-xray-reference-checkbox');
+    if (checkbox) checkbox.style.accentColor = '';
+
+    const selectedKey = checkbox?.checked ? checkbox.dataset.referenceKey : null;
+    if (selectedKey) {
+      const color = xrayReferenceColor(selectedKey);
+      if (color) {
+        checkbox.style.accentColor = color.solid;
+        xrayApplySkuHighlight(row, [color]);
+        continue;
+      }
+    }
+
+    const matchItem = xraySortState.lastMatches.get(String(row.dataset.xrayProductId || ''));
+    const matches = matchItem?.match?.referenceMatches || [];
+    const colors = matches
+      .filter((match) => match.score >= XRAY_SORT_MIN_CONFIDENCE && xraySkuContainsSkuId(row.__xraySku, match.sku?.skuId))
+      .map((match) => xrayReferenceColor(match.reference))
+      .filter(Boolean);
+    xrayApplySkuHighlight(row, colors);
+  }
 }
 
 function xraySetReference(productId, sku, selected) {
@@ -251,11 +320,14 @@ function xraySetReference(productId, sku, selected) {
     xraySortState.references.delete(key);
   }
   xraySyncReferenceControls();
+  xrayRefreshSkuHighlights();
 }
 
 function xraySyncReferenceControls() {
   for (const checkbox of document.querySelectorAll('.ali-price-xray-reference-checkbox')) {
     checkbox.checked = xraySortState.references.has(checkbox.dataset.referenceKey);
+    const color = checkbox.checked ? xrayReferenceColor(checkbox.dataset.referenceKey) : null;
+    checkbox.style.accentColor = color?.solid || '';
   }
   const count = xraySortState.references.size;
   for (const button of document.querySelectorAll('.ali-price-xray-sort-button')) {
@@ -268,6 +340,7 @@ function xraySyncReferenceControls() {
 
 function xrayDecorateSkuRow(row, sku, productId, unavailable) {
   row.dataset.xraySkuId = String(sku.skuId);
+  row.dataset.xrayProductId = String(productId);
   row.__xraySku = sku;
   if (unavailable || sku.salable === false) return row;
 
@@ -467,6 +540,7 @@ async function xraySortAllCards() {
     });
 
     xraySortState.lastMatches = new Map(matches.map((item) => [String(item.candidate.productId), item]));
+    xrayRefreshSkuHighlights();
     const confidentCount = xrayApplyCardOrdering(matches);
     badge.textContent = `Xray: sorted ${confidentCount}/${candidates.length}`;
     badge.style.background = confidentCount ? 'rgba(20,100,45,.88)' : 'rgba(150,80,20,.90)';
@@ -504,6 +578,7 @@ renderPanel = function xrayRenderPanelWithSort(card, result, anchor) {
     xrayDecorateSkuRow(row, row.__xraySku, result.productId, row.__xrayUnavailable);
   }
   xrayAddPanelControls(panel, result);
+  xrayRefreshSkuHighlights();
 };
 
 log('reference SKU hybrid sorter loaded');
