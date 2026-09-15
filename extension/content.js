@@ -88,6 +88,27 @@ function money(value, currency) {
   }
 }
 
+function moneyWithCurrency(value, currency) {
+  if (!Number.isFinite(value)) return '—';
+  const code = String(currency || '').toUpperCase();
+  const prefixes = {
+    AUD: 'AU$',
+    USD: 'US$',
+    NZD: 'NZ$',
+    CAD: 'CA$',
+    SGD: 'SG$',
+    HKD: 'HK$'
+  };
+  const prefix = prefixes[code];
+  if (!prefix) return money(value, code);
+  try {
+    const number = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(value);
+    return `${prefix}${number}`;
+  } catch {
+    return `${prefix}${value.toFixed(2)}`;
+  }
+}
+
 function ensurePositioned(card) {
   if (getComputedStyle(card).position === 'static') card.style.position = 'relative';
 }
@@ -288,7 +309,7 @@ function createSkuRow(sku, currency, unavailable = false) {
     fontSize: mobile ? '11px' : '9px',
     overflowWrap: 'anywhere'
   });
-  const stockText = group?.rawCount > 1
+  const availabilityText = group?.rawCount > 1
     ? (sku.salable === true
       ? `${group.saleableCount} saleable of ${group.rawCount} backend paths`
       : (sku.salable === false
@@ -296,15 +317,15 @@ function createSkuRow(sku, currency, unavailable = false) {
         : `${group.unknownCount} of ${group.rawCount} backend paths have unknown availability`))
     : (sku.salable === false
       ? 'sold out'
-      : (sku.salable === true ? `saleable${Number.isFinite(sku.stock) ? ` · stock ${sku.stock}` : ''}` : 'saleability unknown'));
+      : (sku.salable === true ? 'saleable' : 'saleability unknown'));
   const skuPrefix = group?.rawCount > 1 ? '' : `SKU ${sku.skuId} · `;
-  meta.textContent = `${skuPrefix}${stockText}${sku.priceSource ? ` · ${sku.priceSource}` : ''}`;
+  meta.textContent = `${skuPrefix}${availabilityText}`;
   left.appendChild(meta);
 
   const price = document.createElement('strong');
   price.textContent = group && Number.isFinite(group.min) && Number.isFinite(group.max) && group.min !== group.max
     ? `${money(group.min, sku.currency || currency)} – ${money(group.max, sku.currency || currency)}`
-    : (sku.salePriceString || money(sku.salePrice, sku.currency || currency));
+    : money(sku.salePrice, sku.currency || currency);
   price.style.fontSize = mobile ? '14px' : '12px';
   price.style.whiteSpace = 'nowrap';
   if (sku.discount) price.title = sku.discount;
@@ -338,9 +359,9 @@ function renderPanel(card, result, anchor) {
     width: wideMobile ? '50vw' : 'auto',
     maxWidth: wideMobile ? '50vw' : 'none',
     maxHeight: 'calc(100dvh - 16px - env(safe-area-inset-top) - env(safe-area-inset-bottom))',
-    overflow: 'auto',
-    overscrollBehavior: 'contain',
-    WebkitOverflowScrolling: 'touch',
+    display: 'flex',
+    flexDirection: 'column',
+    overflow: 'hidden',
     boxSizing: 'border-box',
     padding: '12px',
     border: '1px solid rgba(0,0,0,.25)',
@@ -356,7 +377,9 @@ function renderPanel(card, result, anchor) {
     right: '6px',
     width: 'min(430px, calc(100% - 12px))',
     maxHeight: '460px',
-    overflow: 'auto',
+    display: 'flex',
+    flexDirection: 'column',
+    overflow: 'hidden',
     boxSizing: 'border-box',
     padding: '10px',
     border: '1px solid rgba(0,0,0,.25)',
@@ -372,9 +395,6 @@ function renderPanel(card, result, anchor) {
     display: 'flex',
     alignItems: 'center',
     gap: '8px',
-    position: mobile ? 'sticky' : 'static',
-    top: mobile ? '-12px' : 'auto',
-    zIndex: '1',
     margin: mobile ? '-12px -12px 8px' : '0 0 6px',
     padding: mobile ? '8px 12px' : '0',
     borderBottom: mobile ? '1px solid #eee' : '0',
@@ -385,7 +405,7 @@ function renderPanel(card, result, anchor) {
   title.style.fontWeight = '700';
   title.style.flex = '1';
   title.style.minWidth = '0';
-  title.textContent = `Ali-Price-Xray · ${result.productId}`;
+  title.textContent = 'From Price Xray:';
 
   const close = document.createElement('button');
   close.type = 'button';
@@ -413,6 +433,7 @@ function renderPanel(card, result, anchor) {
   panel.appendChild(header);
 
   if (!result.ok) {
+    panel.style.overflow = 'auto';
     const error = document.createElement('div');
     error.style.color = '#a40000';
     error.textContent = result.error || 'SKU request failed.';
@@ -435,7 +456,7 @@ function renderPanel(card, result, anchor) {
   const summary = document.createElement('div');
   summary.style.marginBottom = '4px';
   const countText = `${available.length} available variant${available.length === 1 ? '' : 's'}`;
-  summary.textContent = `${countText} · ${money(result.min, currency)} – ${money(result.max, currency)}`;
+  summary.textContent = `${countText} · ${moneyWithCurrency(result.min, currency)} – ${moneyWithCurrency(result.max, currency)}`;
   panel.appendChild(summary);
 
   if (visibleSkus.length !== result.count || available.length !== result.saleableCount) {
@@ -452,17 +473,19 @@ function renderPanel(card, result, anchor) {
     panel.appendChild(target);
   }
 
-  const locale = document.createElement('div');
-  Object.assign(locale.style, { marginBottom: '8px', color: '#666', fontSize: mobile ? '11px' : '10px' });
-  const context = result.debug?.contextFields?.length
-    ? ` · context: ${result.debug.contextFields.join(', ')}`
-    : '';
-  locale.textContent = `${result.prefs?.country || '?'} / ${currency} · ${result.prefs?.source || 'unknown locale source'}${context}`;
-  panel.appendChild(locale);
+  const scrollBody = document.createElement('div');
+  scrollBody.className = 'ali-price-xray-option-scroll';
+  Object.assign(scrollBody.style, {
+    flex: '1 1 auto',
+    minHeight: '0',
+    overflow: 'auto',
+    overscrollBehavior: 'contain',
+    WebkitOverflowScrolling: 'touch'
+  });
 
   const mainList = document.createElement('div');
   for (const sku of [...available, ...unknown]) mainList.appendChild(createSkuRow(sku, currency, false));
-  panel.appendChild(mainList);
+  scrollBody.appendChild(mainList);
 
   if (unavailable.length) {
     const details = document.createElement('details');
@@ -492,9 +515,10 @@ function renderPanel(card, result, anchor) {
     const soldOutList = document.createElement('div');
     for (const sku of unavailable) soldOutList.appendChild(createSkuRow(sku, currency, true));
     details.appendChild(soldOutList);
-    panel.appendChild(details);
+    scrollBody.appendChild(details);
   }
 
+  panel.appendChild(scrollBody);
   (mobile ? document.documentElement : card).appendChild(panel);
 }
 
