@@ -102,23 +102,6 @@ function removePanel(card, productId) {
   if (productId) findPanel(productId)?.remove();
 }
 
-function skuDisplayLabel(sku) {
-  const rawAttr = String(sku?.skuAttr || '').trim();
-  if (rawAttr) {
-    const labels = rawAttr
-      .split(';')
-      .map((part) => {
-        const hash = part.indexOf('#');
-        return hash >= 0 ? part.slice(hash + 1).trim() : '';
-      })
-      .filter(Boolean);
-    if (labels.length) return labels.join(' · ');
-  }
-  const rawPath = String(sku?.skuPath || '').trim();
-  if (rawPath) return `path ${rawPath}`;
-  return `SKU ${sku?.skuId || '?'}`;
-}
-
 function normalizedImageUrl(url) {
   if (typeof url !== 'string' || !url.trim()) return null;
   if (url.startsWith('//')) return `https:${url}`;
@@ -286,7 +269,10 @@ function createSkuRow(sku, currency, unavailable = false) {
 
   const label = document.createElement('div');
   label.textContent = skuDisplayLabel(sku);
-  label.title = `SKU ${sku.skuId}${sku.skuPath ? `\npath ${sku.skuPath}` : ''}`;
+  const group = sku.xrayVisibleGroup;
+  label.title = group?.rawCount > 1
+    ? `${group.rawCount} backend SKU paths\nRepresentative SKU ${sku.skuId}`
+    : `SKU ${sku.skuId}${sku.skuPath ? `\npath ${sku.skuPath}` : ''}`;
   Object.assign(label.style, {
     color: '#333',
     fontSize: mobile ? '14px' : '12px',
@@ -302,14 +288,23 @@ function createSkuRow(sku, currency, unavailable = false) {
     fontSize: mobile ? '11px' : '9px',
     overflowWrap: 'anywhere'
   });
-  const stockText = sku.salable === false
-    ? 'sold out'
-    : (sku.salable === true ? `saleable${Number.isFinite(sku.stock) ? ` · stock ${sku.stock}` : ''}` : 'saleability unknown');
-  meta.textContent = `SKU ${sku.skuId} · ${stockText}${sku.priceSource ? ` · ${sku.priceSource}` : ''}`;
+  const stockText = group?.rawCount > 1
+    ? (sku.salable === true
+      ? `${group.saleableCount} saleable of ${group.rawCount} backend paths`
+      : (sku.salable === false
+        ? `sold out across ${group.rawCount} backend paths`
+        : `${group.unknownCount} of ${group.rawCount} backend paths have unknown availability`))
+    : (sku.salable === false
+      ? 'sold out'
+      : (sku.salable === true ? `saleable${Number.isFinite(sku.stock) ? ` · stock ${sku.stock}` : ''}` : 'saleability unknown'));
+  const skuPrefix = group?.rawCount > 1 ? '' : `SKU ${sku.skuId} · `;
+  meta.textContent = `${skuPrefix}${stockText}${sku.priceSource ? ` · ${sku.priceSource}` : ''}`;
   left.appendChild(meta);
 
   const price = document.createElement('strong');
-  price.textContent = sku.salePriceString || money(sku.salePrice, sku.currency || currency);
+  price.textContent = group && Number.isFinite(group.min) && Number.isFinite(group.max) && group.min !== group.max
+    ? `${money(group.min, sku.currency || currency)} – ${money(group.max, sku.currency || currency)}`
+    : (sku.salePriceString || money(sku.salePrice, sku.currency || currency));
   price.style.fontSize = mobile ? '14px' : '12px';
   price.style.whiteSpace = 'nowrap';
   if (sku.discount) price.title = sku.discount;
@@ -432,14 +427,23 @@ function renderPanel(card, result, anchor) {
     return;
   }
 
-  const currency = result.prefs?.currency || result.skus?.find((sku) => sku.currency)?.currency || 'AUD';
+  const visibleSkus = xrayGroupVisibleSkus(result.skus);
+  const currency = result.prefs?.currency || visibleSkus.find((sku) => sku.currency)?.currency || 'AUD';
+  const available = visibleSkus.filter((sku) => sku.salable === true);
+  const unknown = visibleSkus.filter((sku) => sku.salable == null);
+  const unavailable = visibleSkus.filter((sku) => sku.salable === false);
   const summary = document.createElement('div');
   summary.style.marginBottom = '4px';
-  const countText = Number.isFinite(result.saleableCount)
-    ? `${result.saleableCount} available variant${result.saleableCount === 1 ? '' : 's'}`
-    : `${result.count} backend SKU${result.count === 1 ? '' : 's'}`;
+  const countText = `${available.length} available variant${available.length === 1 ? '' : 's'}`;
   summary.textContent = `${countText} · ${money(result.min, currency)} – ${money(result.max, currency)}`;
   panel.appendChild(summary);
+
+  if (visibleSkus.length !== result.count || available.length !== result.saleableCount) {
+    const backendCount = document.createElement('div');
+    Object.assign(backendCount.style, { marginBottom: '4px', color: '#777', fontSize: mobile ? '11px' : '10px' });
+    backendCount.textContent = `${result.saleableCount} saleable of ${result.count} backend SKU paths`;
+    panel.appendChild(backendCount);
+  }
 
   if (result.targetPriceString) {
     const target = document.createElement('div');
@@ -455,10 +459,6 @@ function renderPanel(card, result, anchor) {
     : '';
   locale.textContent = `${result.prefs?.country || '?'} / ${currency} · ${result.prefs?.source || 'unknown locale source'}${context}`;
   panel.appendChild(locale);
-
-  const available = result.skus.filter((sku) => sku.salable === true);
-  const unknown = result.skus.filter((sku) => sku.salable == null);
-  const unavailable = result.skus.filter((sku) => sku.salable === false);
 
   const mainList = document.createElement('div');
   for (const sku of [...available, ...unknown]) mainList.appendChild(createSkuRow(sku, currency, false));
