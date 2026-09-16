@@ -47,7 +47,7 @@ test('Gemini requests include cached public image URLs for references and shortl
     imageUrl: 'https://ae01.alicdn.com/kf/reference.jpg'
   }, true);
 
-  context.xraySortState.resultCache.set('p1', {
+  context.testResult = {
     ok: true,
     skus: [{
       skuId: 'candidate',
@@ -55,7 +55,8 @@ test('Gemini requests include cached public image URLs for references and shortl
       imageUrl: 'https://ae01.alicdn.com/kf/candidate.webp',
       salable: true
     }]
-  });
+  };
+  vm.runInContext("xraySortState.resultCache.set('p1', testResult)", context);
 
   await context.xrayAiRequestBatches(
     [{ id: 'source:ref', label: 'HS-02B-3 Tips' }],
