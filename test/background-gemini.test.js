@@ -63,6 +63,24 @@ test('normalizes and bounds Gemini batch input', () => {
   });
 });
 
+test('Gemini prompt treats omitted variant details as unknown rather than conflicts', () => {
+  const { context } = loadGemini();
+  const batch = context.xrayGeminiNormalizeBatch({
+    references: [{ id: 'r1', label: 'HS-02B-3 Tips' }],
+    groups: [{
+      id: 'g1',
+      candidates: [{ id: 'c1', label: '02B n Toolbox n 3TIP' }]
+    }]
+  });
+  const prompt = context.xrayGeminiPrompt(batch);
+
+  assert.match(prompt, /Only an explicit conflict in a variant-defining fact/i);
+  assert.match(prompt, /omitted on the other is unknown, not a conflict/i);
+  assert.match(prompt, /do not reject a candidate merely because one label names a package, box, bundle, or accessory detail/i);
+  assert.match(prompt, /HS-02B-3 Tips/);
+  assert.match(prompt, /02B n Toolbox n 3TIP/);
+});
+
 test('invalid Gemini candidate ids are converted to NONE', () => {
   const { context } = loadGemini();
   const batch = {
