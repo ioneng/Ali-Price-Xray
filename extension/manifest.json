@@ -1,10 +1,11 @@
 {
   "manifest_version": 3,
   "name": "Ali-Price-Xray",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Inspect the full AliExpress SKU price set behind search listings.",
   "permissions": [
-    "cookies"
+    "cookies",
+    "storage"
   ],
   "host_permissions": [
     "https://aliexpress.com/*",
@@ -14,18 +15,33 @@
     "https://*.alicdn.com/*",
     "https://*.aliexpress-media.com/*"
   ],
+  "optional_host_permissions": [
+    "https://generativelanguage.googleapis.com/*"
+  ],
   "background": {
-    "scripts": ["background.js", "background-images.js", "background-sort.js"]
+    "scripts": [
+      "background.js",
+      "background-debug.js",
+      "settings.js",
+      "background-images.js",
+      "background-sort.js",
+      "background-gemini.js",
+      "background-gemini-vision.js"
+    ]
+  },
+  "options_ui": {
+    "page": "options/options.html",
+    "open_in_tab": true
   },
   "content_scripts": [
     {
       "matches": [
-        "https://aliexpress.com/*",
-        "https://*.aliexpress.com/*",
-        "https://aliexpress.us/*",
-        "https://*.aliexpress.us/*"
+        "https://aliexpress.com/w/wholesale-*",
+        "https://*.aliexpress.com/w/wholesale-*",
+        "https://aliexpress.us/w/wholesale-*",
+        "https://*.aliexpress.us/w/wholesale-*"
       ],
-      "js": ["content-sku-groups.js", "content.js", "content-sort.js", "content-sort-runtime.js"],
+      "js": ["content-sku-groups.js", "content.js", "content-search-links.js", "content-sort.js", "content-sku-ids.js", "content-ai.js", "content-ai-images.js", "content-sort-runtime.js", "content-compare-gate.js"],
       "run_at": "document_idle"
     }
   ],
@@ -33,7 +49,8 @@
     "gecko": {
       "id": "ali-price-xray@ioneng",
       "data_collection_permissions": {
-        "required": ["none"]
+        "required": ["none"],
+        "optional": ["websiteContent", "authenticationInfo"]
       },
       "strict_min_version": "140.0"
     },
