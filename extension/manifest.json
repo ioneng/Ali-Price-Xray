@@ -21,6 +21,7 @@
   "background": {
     "scripts": [
       "background.js",
+      "background-debug.js",
       "settings.js",
       "background-images.js",
       "background-sort.js",
