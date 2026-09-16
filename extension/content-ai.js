@@ -1,6 +1,20 @@
 // Optional semantic fallback layered on top of the deterministic SKU matcher.
 // Only ambiguous, locally non-contradictory labels are sent to the background.
 
+// TEMPORARY diagnostics for live matcher debugging. These messages are mirrored
+// to the background page so they are visible in Firefox's extension debugger.
+const XRAY_AI_TEMP_DEBUG = true;
+function xrayAiTempDebug(event, details = {}) {
+  if (!XRAY_AI_TEMP_DEBUG) return;
+  try {
+    console.log('[Ali-Price-Xray:AI debug]', event, details);
+  } catch {}
+  try {
+    const reply = api.runtime.sendMessage({ type: 'xray:ai-debug', event, details });
+    if (reply?.catch) reply.catch(() => {});
+  } catch {}
+}
+
 // Hard variant contradictions are authoritative. Marketplace sellers often reuse
 // the same thumbnail across several variants, so image identity must never turn
 // a known model/quantity/package conflict into a confident match.
@@ -76,11 +90,63 @@ function xrayAiBuildGroups(matches) {
   const shortlists = new Map();
 
   for (const item of matches) {
-    if (!item.result?.ok || !item.match) continue;
-    const shortlist = xrayAiCandidateRows(item.result);
-    if (!xrayAiNeedsHelp(item.match, shortlist)) continue;
+    const productId = String(item.candidate?.productId || '');
+    if (!item.result?.ok || !item.match) {
+      xrayAiTempDebug('gate-skip-no-local-match', {
+        productId,
+        resultOk: Boolean(item.result?.ok),
+        hasMatch: Boolean(item.match)
+      });
+      continue;
+    }
 
-    const groupId = String(item.candidate.productId);
+    const shortlist = xrayAiCandidateRows(item.result);
+    const local = xrayCheapPairScore(item.match.reference, item.match.sku);
+    const top = shortlist[0]?.cheap || 0;
+    const second = shortlist[1]?.cheap || 0;
+    const margin = top - second;
+    const needsHelp = xrayAiNeedsHelp(item.match, shortlist);
+
+    xrayAiTempDebug('gate', {
+      productId,
+      localWinner: {
+        skuId: String(item.match.sku?.skuId || ''),
+        label: skuDisplayLabel(item.match.sku),
+        score: item.match.score,
+        text: item.match.text,
+        image: item.match.image,
+        structuredExact: Boolean(local.structured?.exact),
+        structuredContradiction: Boolean(local.structured?.contradiction),
+        imageExact: Boolean(local.imageExact)
+      },
+      shortlist: shortlist.map((row) => ({
+        skuId: String(row.sku?.skuId || ''),
+        label: skuDisplayLabel(row.sku),
+        cheap: row.cheap,
+        text: row.text,
+        structuredExact: Boolean(row.structured?.exact),
+        imageExact: Boolean(row.imageExact)
+      })),
+      top,
+      second,
+      margin,
+      thresholds: {
+        clearLocalScore: XRAY_AI_CLEAR_LOCAL_SCORE,
+        clearLocalMargin: XRAY_AI_CLEAR_LOCAL_MARGIN
+      },
+      needsHelp,
+      skipReason: needsHelp
+        ? null
+        : (local.structured?.exact
+          ? 'structured-exact'
+          : (local.imageExact
+            ? 'image-exact'
+            : (!shortlist.length ? 'empty-shortlist' : 'local-clear')))
+    });
+
+    if (!needsHelp) continue;
+
+    const groupId = productId;
     shortlists.set(groupId, shortlist);
     groups.push({
       id: groupId,
@@ -91,32 +157,56 @@ function xrayAiBuildGroups(matches) {
     });
   }
 
+  xrayAiTempDebug('groups-built', {
+    matchCount: matches.length,
+    aiGroupCount: groups.length,
+    groupIds: groups.map((group) => group.id)
+  });
   return { groups, shortlists };
 }
 
 async function xrayAiApplyMatches(matches, badge) {
   const { groups, shortlists } = xrayAiBuildGroups(matches);
-  if (!groups.length) return { used: false, resolved: 0, checked: 0 };
+  if (!groups.length) {
+    xrayAiTempDebug('no-ai-request', { reason: 'no-ambiguous-groups' });
+    return { used: false, resolved: 0, checked: 0 };
+  }
 
   if (badge) {
     badge.textContent = `Xray: asking AI about ${groups.length} ambiguous listing${groups.length === 1 ? '' : 's'}…`;
     badge.style.background = 'rgba(55,65,120,.90)';
   }
 
+  const request = {
+    type: 'xray:ai-match-batch',
+    references: [...xraySortState.references.values()].map((reference) => ({
+      id: reference.key,
+      label: reference.label
+    })),
+    groups
+  };
+  xrayAiTempDebug('dispatch-ai-batch', {
+    references: request.references,
+    groups: request.groups
+  });
+
   let response;
   try {
-    response = await api.runtime.sendMessage({
-      type: 'xray:ai-match-batch',
-      references: [...xraySortState.references.values()].map((reference) => ({
-        id: reference.key,
-        label: reference.label
-      })),
-      groups
-    });
+    response = await api.runtime.sendMessage(request);
   } catch (error) {
+    xrayAiTempDebug('ai-request-threw', { error: error?.message || String(error) });
     log('AI matching request failed', error);
     return { used: false, resolved: 0, checked: groups.length, error: error?.message || String(error) };
   }
+
+  xrayAiTempDebug('ai-response', {
+    ok: Boolean(response?.ok),
+    enabled: Boolean(response?.enabled),
+    provider: response?.provider || null,
+    model: response?.model || null,
+    error: response?.error || null,
+    matches: response?.matches || []
+  });
 
   if (!response?.ok || !response.enabled) {
     if (response?.error) log('AI matching unavailable', response.error);
@@ -129,14 +219,43 @@ async function xrayAiApplyMatches(matches, badge) {
   for (const item of matches) {
     const groupId = String(item.candidate.productId);
     const ai = byGroup.get(groupId);
-    if (!ai || ai.candidateId === 'NONE' || Number(ai.confidence) < XRAY_AI_MIN_CONFIDENCE) continue;
+    if (!ai || ai.candidateId === 'NONE' || Number(ai.confidence) < XRAY_AI_MIN_CONFIDENCE) {
+      if (shortlists.has(groupId)) {
+        xrayAiTempDebug('ai-result-not-applied', {
+          groupId,
+          reason: !ai
+            ? 'no-result'
+            : (ai.candidateId === 'NONE' ? 'none' : 'confidence-below-threshold'),
+          candidateId: ai?.candidateId || null,
+          confidence: Number(ai?.confidence) || 0,
+          threshold: XRAY_AI_MIN_CONFIDENCE
+        });
+      }
+      continue;
+    }
 
     const shortlist = shortlists.get(groupId) || [];
     const chosen = shortlist.find((row) => String(row.sku.skuId) === String(ai.candidateId));
-    if (!chosen || chosen.structured?.contradiction) continue;
+    if (!chosen || chosen.structured?.contradiction) {
+      xrayAiTempDebug('ai-result-not-applied', {
+        groupId,
+        reason: !chosen ? 'candidate-not-in-shortlist' : 'candidate-has-contradiction',
+        candidateId: ai.candidateId,
+        confidence: Number(ai.confidence)
+      });
+      continue;
+    }
 
     const scored = await xrayScoreSkuAgainstReference(chosen.reference, chosen.sku, true);
-    if (scored.structured?.contradiction) continue;
+    if (scored.structured?.contradiction) {
+      xrayAiTempDebug('ai-result-not-applied', {
+        groupId,
+        reason: 'rescored-contradiction',
+        candidateId: ai.candidateId,
+        confidence: Number(ai.confidence)
+      });
+      continue;
+    }
 
     item.match = {
       ...scored,
@@ -152,6 +271,14 @@ async function xrayAiApplyMatches(matches, badge) {
       }
     };
     resolved += 1;
+    xrayAiTempDebug('ai-result-applied', {
+      groupId,
+      candidateId: String(chosen.sku?.skuId || ''),
+      label: skuDisplayLabel(chosen.sku),
+      confidence: Number(ai.confidence),
+      finalScore: item.match.score,
+      reason: String(ai.reason || '')
+    });
   }
 
   return { used: true, resolved, checked: groups.length };
@@ -177,6 +304,14 @@ xraySortAllCards = async function xraySortAllCardsWithAiFallback() {
 
   const badge = ensureDebugBadge();
   const candidates = candidateCards();
+  xrayAiTempDebug('sort-start', {
+    referenceCount: xraySortState.references.size,
+    references: [...xraySortState.references.values()].map((reference) => ({
+      id: reference.key,
+      label: reference.label
+    })),
+    candidateCount: candidates.length
+  });
   badge.textContent = `Xray: matching 0/${candidates.length}`;
   badge.style.background = 'rgba(90,70,20,.90)';
   let completed = 0;
@@ -188,6 +323,18 @@ xraySortAllCards = async function xraySortAllCardsWithAiFallback() {
       completed += 1;
       badge.textContent = `Xray: matching ${completed}/${candidates.length}`;
       return { candidate, result, match };
+    });
+
+    xrayAiTempDebug('local-matching-finished', {
+      matches: matches.map((item) => ({
+        productId: String(item.candidate?.productId || ''),
+        resultOk: Boolean(item.result?.ok),
+        skuId: String(item.match?.sku?.skuId || ''),
+        label: item.match?.sku ? skuDisplayLabel(item.match.sku) : null,
+        score: item.match?.score ?? null,
+        text: item.match?.text ?? null,
+        image: item.match?.image ?? null
+      }))
     });
 
     const aiOutcome = await xrayAiApplyMatches(matches, badge);
@@ -202,6 +349,11 @@ xraySortAllCards = async function xraySortAllCardsWithAiFallback() {
       badge.textContent = `Xray: sorted ${confidentCount}/${candidates.length}`;
     }
     badge.style.background = confidentCount ? 'rgba(20,100,45,.88)' : 'rgba(150,80,20,.90)';
+    xrayAiTempDebug('sort-finished', {
+      confidentCount,
+      total: candidates.length,
+      ai: aiOutcome
+    });
     log('reference SKU sort complete', {
       references: [...xraySortState.references.values()],
       confidentCount,
