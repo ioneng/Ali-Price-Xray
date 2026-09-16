@@ -39,7 +39,7 @@
         "https://aliexpress.us/*",
         "https://*.aliexpress.us/*"
       ],
-      "js": ["content-sku-groups.js", "content.js", "content-sort.js", "content-sort-runtime.js"],
+      "js": ["content-sku-groups.js", "content.js", "content-sort.js", "content-ai.js", "content-sort-runtime.js"],
       "run_at": "document_idle"
     }
   ],
