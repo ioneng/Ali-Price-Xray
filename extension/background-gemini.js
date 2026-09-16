@@ -48,11 +48,14 @@ function xrayGeminiPrompt(batch) {
   return [
     'You match purchasable product variants from different marketplace listings.',
     'For each candidate group, choose the candidate that represents the same variant as ANY reference option, or NONE when no candidate is confidently equivalent.',
-    'Treat seller wording, word order, abbreviations, spacing, singular/plural forms, and language differences as potentially equivalent.',
+    'Treat seller wording, word order, abbreviations, spacing, singular/plural forms, language differences, and omitted vendor/family prefixes as potentially equivalent when the remaining model facts agree.',
     'Variant-defining facts include model, size, quantity, colour, capacity, voltage, plug/region, package/bundle type, and included accessories.',
-    'A conflict in a variant-defining fact means the candidate is not equivalent.',
+    'Only an explicit conflict in a variant-defining fact means the candidate is not equivalent.',
+    'A fact mentioned on one side but omitted on the other is unknown, not a conflict. A marketplace label may be only a partial description of the same variant.',
+    'Extra non-conflicting detail in one listing is allowed. In particular, do not reject a candidate merely because one label names a package, box, bundle, or accessory detail that the other label omits.',
+    'For example, a reference saying "Model A 3 Tips" can match a candidate saying "Model A Toolbox 3TIP" when no stated fact conflicts; silence about the toolbox is not the same as saying no toolbox.',
+    'Choose NONE when there is an explicit conflict or when the shared facts are too weak to identify the same variant, not merely because one side is less detailed.',
     'Do not infer from price; prices are intentionally omitted.',
-    'When important details are missing or uncertain, choose NONE rather than guessing.',
     'Return one result for every group.',
     '',
     JSON.stringify(batch)
