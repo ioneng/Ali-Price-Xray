@@ -36,10 +36,10 @@
   "content_scripts": [
     {
       "matches": [
-        "https://aliexpress.com/*",
-        "https://*.aliexpress.com/*",
-        "https://aliexpress.us/*",
-        "https://*.aliexpress.us/*"
+        "https://aliexpress.com/w/wholesale-*",
+        "https://*.aliexpress.com/w/wholesale-*",
+        "https://aliexpress.us/w/wholesale-*",
+        "https://*.aliexpress.us/w/wholesale-*"
       ],
       "js": ["content-sku-groups.js", "content.js", "content-sort.js", "content-sku-ids.js", "content-ai.js", "content-ai-images.js", "content-sort-runtime.js"],
       "run_at": "document_idle"
