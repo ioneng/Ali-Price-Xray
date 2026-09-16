@@ -47,6 +47,29 @@ test('AI shortlist excludes candidates with deterministic hard contradictions', 
   assert.deepEqual(Array.from(rows, (row) => row.sku.skuId), ['same']);
 });
 
+test('AI shortlist prioritizes matching model and tip facts even when free-text scores tie', () => {
+  const context = loadAiMatcher();
+  context.xraySetReference('source', { skuId: 'ref', label: 'HS-02B-3 Tips' }, true);
+
+  const rows = context.xrayAiCandidateRows({
+    skus: [
+      { skuId: 'generic-1', label: 'HS-02B Toolbox', salable: true },
+      { skuId: 'generic-2', label: 'HS02B iron', salable: true },
+      { skuId: 'generic-3', label: '02B Toolbox', salable: true },
+      { skuId: 'generic-4', label: '02B iron only', salable: true },
+      { skuId: 'generic-5', label: 'HS02B Toolbox Set', salable: true },
+      { skuId: 'generic-6', label: '02B soldering iron', salable: true },
+      { skuId: 'wanted', label: '02b n toolbox n 3tip', salable: true }
+    ]
+  });
+
+  assert.equal(rows.length, 6);
+  assert.equal(rows[0].sku.skuId, 'wanted');
+  assert.equal(rows[0].agreement.modelAgreement, true);
+  assert.equal(rows[0].agreement.tipAgreement, true);
+  assert.ok(rows.some((row) => row.sku.skuId === 'wanted'));
+});
+
 test('hard variant contradiction beats an identical reused thumbnail', async () => {
   const context = loadAiMatcher();
   context.xraySetReference('source', {
