@@ -44,7 +44,7 @@ test('AI shortlist excludes candidates with deterministic hard contradictions', 
     ]
   });
 
-  assert.deepEqual(rows.map((row) => row.sku.skuId), ['same']);
+  assert.deepEqual(Array.from(rows, (row) => row.sku.skuId), ['same']);
 });
 
 test('exact local structured matches bypass AI', async () => {
