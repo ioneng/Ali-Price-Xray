@@ -1,5 +1,6 @@
 const api = globalThis.browser ?? globalThis.chrome;
 const GEMINI_ORIGIN = 'https://generativelanguage.googleapis.com/*';
+const GEMINI_DATA_COLLECTION = ['websiteContent', 'authenticationInfo'];
 
 const fields = {
   enabled: document.querySelector('#aiMatchingEnabled'),
@@ -26,33 +27,64 @@ function currentSettings() {
   };
 }
 
+function isFirefox() {
+  return typeof api.runtime?.getBrowserInfo === 'function';
+}
+
+async function geminiPermissionStatus() {
+  if (!api.permissions?.contains) {
+    return { dataGranted: true, originGranted: true };
+  }
+
+  const originGranted = await api.permissions
+    .contains({ origins: [GEMINI_ORIGIN] })
+    .catch(() => false);
+
+  let dataGranted = true;
+  if (isFirefox()) {
+    dataGranted = await api.permissions
+      .contains({ data_collection: GEMINI_DATA_COLLECTION })
+      .catch(() => false);
+  }
+
+  return { dataGranted, originGranted };
+}
+
+function geminiPermissionError({ dataGranted, originGranted }) {
+  if (!dataGranted && !originGranted) {
+    return 'Gemini data-sharing and API access permissions were not granted.';
+  }
+  if (!dataGranted) {
+    return 'Gemini data-sharing permission was not granted.';
+  }
+  if (!originGranted) {
+    return 'Gemini API access permission was not granted.';
+  }
+  return 'Gemini permission was not granted.';
+}
+
 async function requestGeminiPermissions() {
   if (!api.permissions?.request) return true;
 
-  if (typeof api.runtime?.getBrowserInfo === 'function') {
-    try {
-      const dataGranted = await api.permissions.request({
-        data_collection: ['websiteContent', 'authenticationInfo']
-      });
-      if (!dataGranted) return false;
-    } catch (error) {
-      console.warn('[Ali-Price-Xray:options] optional data permission request failed', error);
-      return false;
-    }
+  const request = { origins: [GEMINI_ORIGIN] };
+  if (isFirefox()) {
+    request.data_collection = GEMINI_DATA_COLLECTION;
   }
 
   try {
-    return await api.permissions.request({ origins: [GEMINI_ORIGIN] });
+    const granted = await api.permissions.request(request);
+    if (granted) return true;
   } catch (error) {
-    console.warn('[Ali-Price-Xray:options] Gemini host permission request failed', error);
-    return false;
+    console.warn('[Ali-Price-Xray:options] Gemini permission request failed', error);
   }
+
+  throw new Error(geminiPermissionError(await geminiPermissionStatus()));
 }
 
 async function persistForm({ requirePermission = false } = {}) {
   const settings = currentSettings();
-  if ((settings.aiMatchingEnabled || requirePermission) && !(await requestGeminiPermissions())) {
-    throw new Error('Gemini permission was not granted.');
+  if (settings.aiMatchingEnabled || requirePermission) {
+    await requestGeminiPermissions();
   }
 
   if ((settings.aiMatchingEnabled || requirePermission) && !fields.apiKey.value.trim()) {
