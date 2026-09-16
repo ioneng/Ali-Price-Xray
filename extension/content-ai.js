@@ -53,6 +53,8 @@ const XRAY_AI_MAX_CANDIDATES = 4;
 const XRAY_AI_MIN_CONFIDENCE = 0.72;
 const XRAY_AI_CLEAR_LOCAL_SCORE = 0.78;
 const XRAY_AI_CLEAR_LOCAL_MARGIN = 0.14;
+const XRAY_AI_GROUP_BATCH_SIZE = 24;
+const XRAY_AI_PDP_FETCH_CONCURRENCY = 1;
 
 function xrayAiCandidateRows(result) {
   const references = [...xraySortState.references.values()];
@@ -165,6 +167,69 @@ function xrayAiBuildGroups(matches) {
   return { groups, shortlists };
 }
 
+async function xrayAiRequestBatches(references, groups) {
+  const matches = [];
+  let provider = 'gemini';
+  let model = null;
+  let enabled = false;
+  let error = null;
+
+  for (let offset = 0; offset < groups.length; offset += XRAY_AI_GROUP_BATCH_SIZE) {
+    const batchGroups = groups.slice(offset, offset + XRAY_AI_GROUP_BATCH_SIZE);
+    const batchIndex = Math.floor(offset / XRAY_AI_GROUP_BATCH_SIZE) + 1;
+    const batchCount = Math.ceil(groups.length / XRAY_AI_GROUP_BATCH_SIZE);
+    const request = {
+      type: 'xray:ai-match-batch',
+      references,
+      groups: batchGroups
+    };
+
+    xrayAiTempDebug('dispatch-ai-batch', {
+      batchIndex,
+      batchCount,
+      references: request.references,
+      groups: request.groups
+    });
+
+    let response;
+    try {
+      response = await api.runtime.sendMessage(request);
+    } catch (requestError) {
+      error = requestError?.message || String(requestError);
+      xrayAiTempDebug('ai-request-threw', { batchIndex, batchCount, error });
+      log('AI matching request failed', requestError);
+      continue;
+    }
+
+    xrayAiTempDebug('ai-response', {
+      batchIndex,
+      batchCount,
+      ok: Boolean(response?.ok),
+      enabled: Boolean(response?.enabled),
+      provider: response?.provider || null,
+      model: response?.model || null,
+      error: response?.error || null,
+      matches: response?.matches || []
+    });
+
+    if (!response?.ok || !response.enabled) {
+      if (response?.error) {
+        error = response.error;
+        log('AI matching unavailable', response.error);
+      }
+      if (!response?.enabled) break;
+      continue;
+    }
+
+    enabled = true;
+    provider = response.provider || provider;
+    model = response.model || model;
+    matches.push(...(response.matches || []));
+  }
+
+  return { enabled, provider, model, matches, error };
+}
+
 async function xrayAiApplyMatches(matches, badge) {
   const { groups, shortlists } = xrayAiBuildGroups(matches);
   if (!groups.length) {
@@ -177,40 +242,14 @@ async function xrayAiApplyMatches(matches, badge) {
     badge.style.background = 'rgba(55,65,120,.90)';
   }
 
-  const request = {
-    type: 'xray:ai-match-batch',
-    references: [...xraySortState.references.values()].map((reference) => ({
-      id: reference.key,
-      label: reference.label
-    })),
-    groups
-  };
-  xrayAiTempDebug('dispatch-ai-batch', {
-    references: request.references,
-    groups: request.groups
-  });
+  const references = [...xraySortState.references.values()].map((reference) => ({
+    id: reference.key,
+    label: reference.label
+  }));
+  const response = await xrayAiRequestBatches(references, groups);
 
-  let response;
-  try {
-    response = await api.runtime.sendMessage(request);
-  } catch (error) {
-    xrayAiTempDebug('ai-request-threw', { error: error?.message || String(error) });
-    log('AI matching request failed', error);
-    return { used: false, resolved: 0, checked: groups.length, error: error?.message || String(error) };
-  }
-
-  xrayAiTempDebug('ai-response', {
-    ok: Boolean(response?.ok),
-    enabled: Boolean(response?.enabled),
-    provider: response?.provider || null,
-    model: response?.model || null,
-    error: response?.error || null,
-    matches: response?.matches || []
-  });
-
-  if (!response?.ok || !response.enabled) {
-    if (response?.error) log('AI matching unavailable', response.error);
-    return { used: false, resolved: 0, checked: groups.length, error: response?.error || null };
+  if (!response.enabled) {
+    return { used: false, resolved: 0, checked: groups.length, error: response.error || null };
   }
 
   const byGroup = new Map((response.matches || []).map((item) => [String(item.groupId), item]));
@@ -281,7 +320,7 @@ async function xrayAiApplyMatches(matches, badge) {
     });
   }
 
-  return { used: true, resolved, checked: groups.length };
+  return { used: true, resolved, checked: groups.length, error: response.error || null };
 }
 
 const xrayLocalAddMatchBadge = xrayAddMatchBadge;
@@ -310,14 +349,15 @@ xraySortAllCards = async function xraySortAllCardsWithAiFallback() {
       id: reference.key,
       label: reference.label
     })),
-    candidateCount: candidates.length
+    candidateCount: candidates.length,
+    pdpFetchConcurrency: XRAY_AI_PDP_FETCH_CONCURRENCY
   });
   badge.textContent = `Xray: matching 0/${candidates.length}`;
   badge.style.background = 'rgba(90,70,20,.90)';
   let completed = 0;
 
   try {
-    const matches = await xrayMapWithConcurrency(candidates, XRAY_SORT_FETCH_CONCURRENCY, async (candidate) => {
+    const matches = await xrayMapWithConcurrency(candidates, XRAY_AI_PDP_FETCH_CONCURRENCY, async (candidate) => {
       const result = await xrayFetchCandidateResult(candidate);
       const match = result?.ok ? await xrayBestSkuForResult(result) : null;
       completed += 1;
