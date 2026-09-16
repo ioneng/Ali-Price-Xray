@@ -92,6 +92,7 @@ test('weak semantic local matches are eligible for one AI fallback batch', async
   const messages = [];
   const context = loadAiMatcher(async (message) => {
     messages.push(message);
+    if (message?.type === 'xray:ai-debug') return { ok: true };
     return {
       ok: true,
       enabled: true,
@@ -113,9 +114,9 @@ test('weak semantic local matches are eligible for one AI fallback batch', async
   const matches = [{ candidate: { productId: 'p1' }, result, match: local }];
   const outcome = await context.xrayAiApplyMatches(matches, null);
 
-  assert.equal(messages.length, 1);
-  assert.equal(messages[0].type, 'xray:ai-match-batch');
-  assert.equal(messages[0].groups[0].candidates.some((candidate) => 'salePrice' in candidate), false);
+  const aiBatchMessages = messages.filter((message) => message?.type === 'xray:ai-match-batch');
+  assert.equal(aiBatchMessages.length, 1);
+  assert.equal(aiBatchMessages[0].groups[0].candidates.some((candidate) => 'salePrice' in candidate), false);
   assert.equal(outcome.resolved, 1);
   assert.equal(matches[0].match.sku.skuId, 'candidate');
   assert.equal(matches[0].match.ai.provider, 'gemini');
@@ -123,13 +124,16 @@ test('weak semantic local matches are eligible for one AI fallback batch', async
 });
 
 test('AI cannot select a candidate that was not in the local shortlist', async () => {
-  const context = loadAiMatcher(async () => ({
-    ok: true,
-    enabled: true,
-    provider: 'gemini',
-    model: 'gemini-3.5-flash-lite',
-    matches: [{ groupId: 'p1', candidateId: 'invented', confidence: 0.99, reason: 'invalid' }]
-  }));
+  const context = loadAiMatcher(async (message) => {
+    if (message?.type === 'xray:ai-debug') return { ok: true };
+    return {
+      ok: true,
+      enabled: true,
+      provider: 'gemini',
+      model: 'gemini-3.5-flash-lite',
+      matches: [{ groupId: 'p1', candidateId: 'invented', confidence: 0.99, reason: 'invalid' }]
+    };
+  });
   context.xraySetReference('source', { skuId: 'ref', label: 'Red 5000mAh battery' }, true);
 
   const result = {
