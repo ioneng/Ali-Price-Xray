@@ -7,6 +7,12 @@ const XRAY_GEMINI_MAX_GROUPS = 24;
 const XRAY_GEMINI_MAX_CANDIDATES = 6;
 const XRAY_GEMINI_MAX_LABEL = 300;
 const XRAY_GEMINI_TIMEOUT_MS = 15000;
+const XRAY_GEMINI_TEMP_DEBUG = true;
+
+function xrayGeminiTempDebug(event, details = {}) {
+  if (!XRAY_GEMINI_TEMP_DEBUG) return;
+  console.log('[Ali-Price-Xray:AI debug]', event, details);
+}
 
 function xrayGeminiCleanString(value, max = XRAY_GEMINI_MAX_LABEL) {
   return String(value || '').replace(/\s+/g, ' ').trim().slice(0, max);
@@ -78,6 +84,7 @@ async function xrayGeminiGenerateJson({ model, apiKey, prompt, schema }) {
   const timeout = setTimeout(() => controller.abort(), XRAY_GEMINI_TIMEOUT_MS);
   try {
     const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
+    xrayGeminiTempDebug('gemini-fetch-start', { model, endpoint });
     const response = await fetch(endpoint, {
       method: 'POST',
       signal: controller.signal,
@@ -96,6 +103,7 @@ async function xrayGeminiGenerateJson({ model, apiKey, prompt, schema }) {
       })
     });
 
+    xrayGeminiTempDebug('gemini-fetch-response', { status: response.status, ok: response.ok });
     const data = await response.json().catch(() => null);
     if (!response.ok) {
       const message = data?.error?.message || `Gemini returned HTTP ${response.status}.`;
@@ -160,17 +168,35 @@ function xrayGeminiValidateMatches(raw, batch) {
 
 async function xrayGeminiMatchBatch(input, { requireEnabled = true } = {}) {
   const settings = await xrayGetAiSettings();
+  xrayGeminiTempDebug('background-batch-start', {
+    requireEnabled,
+    enabled: settings.aiMatchingEnabled,
+    provider: settings.aiProvider,
+    model: settings.aiModel,
+    incomingReferenceCount: Array.isArray(input?.references) ? input.references.length : 0,
+    incomingGroupCount: Array.isArray(input?.groups) ? input.groups.length : 0
+  });
+
   if (requireEnabled && !settings.aiMatchingEnabled) {
+    xrayGeminiTempDebug('background-batch-stop', { reason: 'ai-disabled' });
     return { ok: true, enabled: false, provider: settings.aiProvider, model: settings.aiModel, matches: [] };
   }
   if (settings.aiProvider !== 'gemini') throw new Error('Unsupported AI provider.');
-  if (!(await xrayGeminiHostAllowed())) throw new Error('Gemini host permission is not granted.');
+  if (!(await xrayGeminiHostAllowed())) {
+    xrayGeminiTempDebug('background-batch-stop', { reason: 'host-permission-missing' });
+    throw new Error('Gemini host permission is not granted.');
+  }
 
   const apiKey = await xrayGetGeminiApiKey();
-  if (!apiKey) throw new Error('Gemini API key is not configured.');
+  if (!apiKey) {
+    xrayGeminiTempDebug('background-batch-stop', { reason: 'api-key-missing' });
+    throw new Error('Gemini API key is not configured.');
+  }
 
   const batch = xrayGeminiNormalizeBatch(input);
+  xrayGeminiTempDebug('background-normalized-batch', batch);
   if (!batch.references.length || !batch.groups.length) {
+    xrayGeminiTempDebug('background-batch-stop', { reason: 'empty-normalized-batch' });
     return { ok: true, enabled: true, provider: settings.aiProvider, model: settings.aiModel, matches: [] };
   }
 
@@ -180,13 +206,15 @@ async function xrayGeminiMatchBatch(input, { requireEnabled = true } = {}) {
     prompt: xrayGeminiPrompt(batch),
     schema: XRAY_GEMINI_MATCH_SCHEMA
   });
+  const matches = xrayGeminiValidateMatches(raw, batch);
+  xrayGeminiTempDebug('background-validated-response', { raw, matches });
 
   return {
     ok: true,
     enabled: true,
     provider: settings.aiProvider,
     model: settings.aiModel,
-    matches: xrayGeminiValidateMatches(raw, batch)
+    matches
   };
 }
 
@@ -205,9 +233,20 @@ async function xrayGeminiTest() {
 }
 
 xrayExtensionApi().runtime.onMessage.addListener((message) => {
+  if (message?.type === 'xray:ai-debug') {
+    xrayGeminiTempDebug(`content:${xrayGeminiCleanString(message.event, 120)}`, message.details || {});
+    return Promise.resolve({ ok: true });
+  }
   if (message?.type === 'xray:ai-match-batch') {
+    xrayGeminiTempDebug('background-received-ai-match-batch', {
+      referenceCount: Array.isArray(message.references) ? message.references.length : 0,
+      groupCount: Array.isArray(message.groups) ? message.groups.length : 0
+    });
     return xrayGeminiMatchBatch(message)
-      .catch((error) => ({ ok: false, error: error?.message || String(error), matches: [] }));
+      .catch((error) => {
+        xrayGeminiTempDebug('background-batch-error', { error: error?.message || String(error) });
+        return { ok: false, error: error?.message || String(error), matches: [] };
+      });
   }
   if (message?.type === 'xray:gemini-test') {
     return xrayGeminiTest()
