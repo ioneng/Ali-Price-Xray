@@ -123,6 +123,50 @@ test('weak semantic local matches are eligible for one AI fallback batch', async
   assert.ok(matches[0].match.score >= 0.9);
 });
 
+test('AI batches more than 24 ambiguous groups without dropping later listings', async () => {
+  const aiBatchMessages = [];
+  const context = loadAiMatcher(async (message) => {
+    if (message?.type === 'xray:ai-debug') return { ok: true };
+    aiBatchMessages.push(message);
+    return {
+      ok: true,
+      enabled: true,
+      provider: 'gemini',
+      model: 'gemini-3.5-flash-lite',
+      matches: message.groups.map((group) => ({
+        groupId: group.id,
+        candidateId: group.candidates[0].id,
+        confidence: 0.9,
+        reason: 'same variant'
+      }))
+    };
+  });
+  context.xraySetReference('source', { skuId: 'ref', label: 'Red 5000mAh battery' }, true);
+
+  const matches = [];
+  for (let index = 0; index < 25; index += 1) {
+    const result = {
+      ok: true,
+      skus: [
+        { skuId: `candidate-${index}`, label: 'Crimson battery 5Ah', salePrice: 10, salable: true },
+        { skuId: `other-${index}`, label: 'Blue battery 8Ah', salePrice: 12, salable: true }
+      ]
+    };
+    const local = await context.xrayBestSkuForResult(result);
+    matches.push({ candidate: { productId: `p${index}` }, result, match: local });
+  }
+
+  const outcome = await context.xrayAiApplyMatches(matches, null);
+
+  assert.equal(aiBatchMessages.length, 2);
+  assert.equal(aiBatchMessages[0].groups.length, 24);
+  assert.equal(aiBatchMessages[1].groups.length, 1);
+  assert.equal(aiBatchMessages[1].groups[0].id, 'p24');
+  assert.equal(outcome.checked, 25);
+  assert.equal(outcome.resolved, 25);
+  assert.equal(matches[24].match.sku.skuId, 'candidate-24');
+});
+
 test('AI cannot select a candidate that was not in the local shortlist', async () => {
   const context = loadAiMatcher(async (message) => {
     if (message?.type === 'xray:ai-debug') return { ok: true };
