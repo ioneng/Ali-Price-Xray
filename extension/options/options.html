@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ali-Price-Xray Settings</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <main>
+    <h1>Ali-Price-Xray Settings</h1>
+
+    <section class="card">
+      <h2>AI-assisted matching</h2>
+      <p class="muted">Xray keeps using its local matcher first. Gemini is only asked to resolve ambiguous product-option matches.</p>
+
+      <label class="toggle-row">
+        <input id="aiMatchingEnabled" type="checkbox">
+        <span>Enable AI-assisted matching</span>
+      </label>
+
+      <label>
+        <span>Provider</span>
+        <select id="aiProvider" disabled>
+          <option value="gemini">Google Gemini</option>
+        </select>
+      </label>
+
+      <label>
+        <span>Model</span>
+        <input id="aiModel" type="text" value="gemini-3.5-flash-lite" spellcheck="false">
+      </label>
+
+      <label>
+        <span>Gemini API key</span>
+        <input id="geminiApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your Google AI Studio API key">
+      </label>
+
+      <label class="toggle-row">
+        <input id="rememberKey" type="checkbox">
+        <span>Remember API key on this device</span>
+      </label>
+      <p class="warning">Remembered keys are stored in browser extension storage, which is not encrypted. Leave this off to keep the key only for the current browser session.</p>
+
+      <div class="actions">
+        <button id="save" type="button">Save settings</button>
+        <button id="test" type="button" class="secondary">Test Gemini</button>
+      </div>
+      <div id="status" role="status" aria-live="polite"></div>
+    </section>
+
+    <section class="card">
+      <h2>Privacy</h2>
+      <p>When Gemini assistance is enabled, Xray sends only the selected reference option labels and a small shortlist of ambiguous candidate option labels to Google. It does not send AliExpress cookies, account details, shipping information, prices, full page HTML, or browsing history.</p>
+      <p class="muted">Google states that Gemini API free-tier submitted content may be used to improve Google products.</p>
+    </section>
+  </main>
+
+  <script src="../settings.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>
