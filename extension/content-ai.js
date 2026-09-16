@@ -49,12 +49,32 @@ xrayScoreSkuAgainstReference = async function xrayScoreSkuAgainstReferenceWithCo
   return { ...scored, structured: cheap.structured };
 };
 
-const XRAY_AI_MAX_CANDIDATES = 4;
+const XRAY_AI_MAX_CANDIDATES = 6;
 const XRAY_AI_MIN_CONFIDENCE = 0.72;
 const XRAY_AI_CLEAR_LOCAL_SCORE = 0.78;
 const XRAY_AI_CLEAR_LOCAL_MARGIN = 0.14;
 const XRAY_AI_GROUP_BATCH_SIZE = 24;
 const XRAY_AI_PDP_FETCH_CONCURRENCY = 1;
+
+function xrayAiVariantAgreement(reference, sku) {
+  const referenceFacts = xrayOptionFacts(reference?.label || '');
+  const candidateFacts = xrayOptionFacts(skuDisplayLabel(sku));
+  const modelAgreement = [...referenceFacts.modelTokens]
+    .some((token) => candidateFacts.modelTokens.has(token));
+  const tipAgreement = Number.isFinite(referenceFacts.tipCount)
+    && Number.isFinite(candidateFacts.tipCount)
+    && referenceFacts.tipCount === candidateFacts.tipCount;
+  const packageAgreement = Boolean(
+    referenceFacts.packageType
+    && candidateFacts.packageType
+    && referenceFacts.packageType === candidateFacts.packageType
+  );
+
+  // Prefer candidates that preserve explicit variant facts even when the free-text
+  // similarity is weak because sellers concatenate model/tip/package tokens differently.
+  const rank = (modelAgreement ? 4 : 0) + (tipAgreement ? 3 : 0) + (packageAgreement ? 1 : 0);
+  return { modelAgreement, tipAgreement, packageAgreement, rank };
+}
 
 function xrayAiCandidateRows(result) {
   const references = [...xraySortState.references.values()];
@@ -66,12 +86,18 @@ function xrayAiCandidateRows(result) {
     for (const reference of references) {
       const pair = xrayCheapPairScore(reference, sku);
       if (pair.structured?.contradiction) continue;
-      if (!best || pair.cheap > best.cheap) best = { reference, sku, ...pair };
+      const agreement = xrayAiVariantAgreement(reference, sku);
+      const candidate = { reference, sku, ...pair, agreement, shortlistRank: agreement.rank };
+      if (!best
+        || candidate.shortlistRank > best.shortlistRank
+        || (candidate.shortlistRank === best.shortlistRank && candidate.cheap > best.cheap)) {
+        best = candidate;
+      }
     }
     if (best) rows.push(best);
   }
 
-  rows.sort((a, b) => b.cheap - a.cheap);
+  rows.sort((a, b) => (b.shortlistRank - a.shortlistRank) || (b.cheap - a.cheap));
   return rows.slice(0, XRAY_AI_MAX_CANDIDATES);
 }
 
@@ -126,6 +152,10 @@ function xrayAiBuildGroups(matches) {
         label: skuDisplayLabel(row.sku),
         cheap: row.cheap,
         text: row.text,
+        variantRank: row.shortlistRank,
+        modelAgreement: Boolean(row.agreement?.modelAgreement),
+        tipAgreement: Boolean(row.agreement?.tipAgreement),
+        packageAgreement: Boolean(row.agreement?.packageAgreement),
         structuredExact: Boolean(row.structured?.exact),
         imageExact: Boolean(row.imageExact)
       })),
