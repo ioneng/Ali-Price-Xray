@@ -67,7 +67,7 @@ test('candidate discovery includes BundleDeals cards but ignores side-cart links
   const candidates = context.candidateCards();
 
   assert.deepEqual(
-    candidates.map((candidate) => candidate.productId),
+    Array.from(candidates, (candidate) => String(candidate.productId)),
     ['1005012218235654', '1005010746975365']
   );
   assert.equal(candidates[0].card, bundleCard);
