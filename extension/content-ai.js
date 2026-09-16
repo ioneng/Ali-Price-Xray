@@ -1,6 +1,40 @@
 // Optional semantic fallback layered on top of the deterministic SKU matcher.
 // Only ambiguous, locally non-contradictory labels are sent to the background.
 
+// Hard variant contradictions are authoritative. Marketplace sellers often reuse
+// the same thumbnail across several variants, so image identity must never turn
+// a known model/quantity/package conflict into a confident match.
+const xrayAiOriginalCheapPairScore = xrayCheapPairScore;
+xrayCheapPairScore = function xrayCheapPairScoreWithContradictionGuard(reference, sku) {
+  const pair = xrayAiOriginalCheapPairScore(reference, sku);
+  if (!pair.structured?.contradiction) return pair;
+  return {
+    ...pair,
+    imageExact: false,
+    cheap: Math.min(pair.text, 0.2)
+  };
+};
+
+const xrayAiOriginalScoreSkuAgainstReference = xrayScoreSkuAgainstReference;
+xrayScoreSkuAgainstReference = async function xrayScoreSkuAgainstReferenceWithContradictionGuard(
+  reference,
+  sku,
+  allowPixelHash = true
+) {
+  const cheap = xrayCheapPairScore(reference, sku);
+  if (cheap.structured?.contradiction) {
+    return {
+      score: Math.min(cheap.text, 0.2),
+      text: cheap.text,
+      image: null,
+      structured: cheap.structured
+    };
+  }
+
+  const scored = await xrayAiOriginalScoreSkuAgainstReference(reference, sku, allowPixelHash);
+  return { ...scored, structured: cheap.structured };
+};
+
 const XRAY_AI_MAX_CANDIDATES = 4;
 const XRAY_AI_MIN_CONFIDENCE = 0.72;
 const XRAY_AI_CLEAR_LOCAL_SCORE = 0.78;
@@ -28,6 +62,7 @@ function xrayAiCandidateRows(result) {
 function xrayAiNeedsHelp(match, shortlist) {
   if (!match || !shortlist?.length) return false;
   const local = xrayCheapPairScore(match.reference, match.sku);
+  if (local.structured?.contradiction) return true;
   if (local.structured?.exact || local.imageExact) return false;
 
   const top = shortlist[0]?.cheap || 0;
@@ -61,7 +96,7 @@ function xrayAiBuildGroups(matches) {
 
 async function xrayAiApplyMatches(matches, badge) {
   const { groups, shortlists } = xrayAiBuildGroups(matches);
-  if (!groups.length) return { used: false, resolved: 0 };
+  if (!groups.length) return { used: false, resolved: 0, checked: 0 };
 
   if (badge) {
     badge.textContent = `Xray: asking AI about ${groups.length} ambiguous listing${groups.length === 1 ? '' : 's'}…`;
@@ -80,12 +115,12 @@ async function xrayAiApplyMatches(matches, badge) {
     });
   } catch (error) {
     log('AI matching request failed', error);
-    return { used: false, resolved: 0, error: error?.message || String(error) };
+    return { used: false, resolved: 0, checked: groups.length, error: error?.message || String(error) };
   }
 
   if (!response?.ok || !response.enabled) {
     if (response?.error) log('AI matching unavailable', response.error);
-    return { used: false, resolved: 0, error: response?.error || null };
+    return { used: false, resolved: 0, checked: groups.length, error: response?.error || null };
   }
 
   const byGroup = new Map((response.matches || []).map((item) => [String(item.groupId), item]));
@@ -119,7 +154,7 @@ async function xrayAiApplyMatches(matches, badge) {
     resolved += 1;
   }
 
-  return { used: true, resolved };
+  return { used: true, resolved, checked: groups.length };
 }
 
 const xrayLocalAddMatchBadge = xrayAddMatchBadge;
@@ -159,9 +194,13 @@ xraySortAllCards = async function xraySortAllCardsWithAiFallback() {
     xraySortState.lastMatches = new Map(matches.map((item) => [String(item.candidate.productId), item]));
     xrayRefreshSkuHighlights();
     const confidentCount = xrayApplyCardOrdering(matches);
-    badge.textContent = aiOutcome.used && aiOutcome.resolved
-      ? `Xray: sorted ${confidentCount}/${candidates.length} · AI resolved ${aiOutcome.resolved}`
-      : `Xray: sorted ${confidentCount}/${candidates.length}`;
+    if (aiOutcome.used) {
+      badge.textContent = `Xray: sorted ${confidentCount}/${candidates.length} · AI checked ${aiOutcome.checked}, resolved ${aiOutcome.resolved}`;
+    } else if (aiOutcome.error) {
+      badge.textContent = `Xray: sorted ${confidentCount}/${candidates.length} · AI unavailable`;
+    } else {
+      badge.textContent = `Xray: sorted ${confidentCount}/${candidates.length}`;
+    }
     badge.style.background = confidentCount ? 'rgba(20,100,45,.88)' : 'rgba(150,80,20,.90)';
     log('reference SKU sort complete', {
       references: [...xraySortState.references.values()],
