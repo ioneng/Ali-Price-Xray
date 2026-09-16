@@ -25,7 +25,8 @@
       "settings.js",
       "background-images.js",
       "background-sort.js",
-      "background-gemini.js"
+      "background-gemini.js",
+      "background-gemini-vision.js"
     ]
   },
   "options_ui": {
@@ -40,7 +41,7 @@
         "https://aliexpress.us/*",
         "https://*.aliexpress.us/*"
       ],
-      "js": ["content-sku-groups.js", "content.js", "content-sort.js", "content-ai.js", "content-sort-runtime.js"],
+      "js": ["content-sku-groups.js", "content.js", "content-sort.js", "content-ai.js", "content-ai-images.js", "content-sort-runtime.js"],
       "run_at": "document_idle"
     }
   ],
