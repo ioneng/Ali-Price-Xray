@@ -47,6 +47,36 @@ test('AI shortlist excludes candidates with deterministic hard contradictions', 
   assert.deepEqual(Array.from(rows, (row) => row.sku.skuId), ['same']);
 });
 
+test('hard variant contradiction beats an identical reused thumbnail', async () => {
+  const context = loadAiMatcher();
+  context.xraySetReference('source', {
+    skuId: 'ref',
+    label: 'HS-02B-3 Tips-Box',
+    imageUrl: 'https://ae01.alicdn.com/kf/shared.jpg'
+  }, true);
+
+  const match = await context.xrayBestSkuForResult({
+    skus: [
+      {
+        skuId: 'wrong',
+        label: '02B n Toolbox n 6TIP',
+        imageUrl: 'https://ae01.alicdn.com/kf/shared.jpg',
+        salePrice: 8,
+        salable: true
+      },
+      {
+        skuId: 'same',
+        label: '02B n Toolbox n 3TIP',
+        salePrice: 10,
+        salable: true
+      }
+    ]
+  });
+
+  assert.equal(match.sku.skuId, 'same');
+  assert.ok(match.score >= 0.8, `expected same variant to remain confident, got ${match.score}`);
+});
+
 test('exact local structured matches bypass AI', async () => {
   const context = loadAiMatcher();
   context.xraySetReference('source', { skuId: 'ref', label: 'HS-02B-3 Tips-Box' }, true);
