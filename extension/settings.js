@@ -9,14 +9,25 @@ function xrayExtensionApi() {
   return globalThis.browser ?? globalThis.chrome;
 }
 
+async function xraySetTrustedStorageAccess(area) {
+  if (!area?.setAccessLevel) return;
+  try {
+    // Chromium expects an options object.
+    await area.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' });
+    return;
+  } catch {}
+  try {
+    // Firefox currently accepts the access level directly.
+    await area.setAccessLevel('TRUSTED_CONTEXTS');
+  } catch {}
+}
+
 async function xrayRestrictSensitiveStorage() {
   const api = xrayExtensionApi();
-  try {
-    await api.storage?.local?.setAccessLevel?.('TRUSTED_CONTEXTS');
-  } catch {}
-  try {
-    await api.storage?.session?.setAccessLevel?.('TRUSTED_CONTEXTS');
-  } catch {}
+  await Promise.all([
+    xraySetTrustedStorageAccess(api.storage?.local),
+    xraySetTrustedStorageAccess(api.storage?.session)
+  ]);
 }
 
 async function xrayGetAiSettings() {
