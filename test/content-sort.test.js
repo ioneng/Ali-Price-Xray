@@ -46,6 +46,40 @@ test('penalizes conflicting model numbers', () => {
   assert.ok(score < 0.25, `expected weak match, got ${score}`);
 });
 
+test('matches equivalent model, tip count, and toolbox wording across sellers', () => {
+  const context = loadMatcher();
+  const reference = 'HS-02B-3 Tips-Box';
+  const candidate = '02B n Toolbox n 3TIP';
+  const text = context.xrayTextSimilarity(reference, candidate);
+  const structured = context.xrayStructuredOptionComparison(reference, candidate);
+  const score = context.xrayCombineSignals(text, 0.05, structured.exact);
+
+  assert.equal(structured.exact, true);
+  assert.ok(text >= 0.9, `expected strong structured text match, got ${text}`);
+  assert.ok(score >= 0.58, `expected image composition not to veto exact option facts, got ${score}`);
+});
+
+test('rejects conflicting tip counts for the same model and package', () => {
+  const context = loadMatcher();
+  const score = context.xrayTextSimilarity('HS-02B-3 Tips-Box', '02B n Toolbox n 6TIP');
+  assert.ok(score < 0.25, `expected weak match, got ${score}`);
+});
+
+test('rejects toolbox and iron-only package conflicts', () => {
+  const context = loadMatcher();
+  const score = context.xrayTextSimilarity('HS-02B-3 Tips-Box', '02B iron only 3TIP');
+  assert.ok(score < 0.25, `expected weak match, got ${score}`);
+});
+
+test('does not claim exact structured agreement when tip count is absent', () => {
+  const context = loadMatcher();
+  const comparison = context.xrayStructuredOptionComparison(
+    'HS-02B-3 Tips-Box',
+    '02BToolbox n 100WEU'
+  );
+  assert.equal(comparison.exact, false);
+});
+
 test('image disagreement can veto misleading identical text', () => {
   const context = loadMatcher();
   const score = context.xrayCombineSignals(1, 0.15);

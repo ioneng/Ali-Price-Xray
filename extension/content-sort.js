@@ -59,6 +59,56 @@ function xrayTokenProfile(label) {
   return { normalized, tokens, compact, modelTokens, numberTokens };
 }
 
+function xrayOptionFacts(label) {
+  const normalized = xrayNormalizeText(label);
+  const modelTokens = new Set();
+  const rawTokens = normalized.split(' ');
+
+  for (let index = 0; index < rawTokens.length; index += 1) {
+    const rawToken = rawTokens[index];
+    const token = rawToken.replace(/^hs(?=\d)/, '');
+    if (/^\d+tips?$/.test(token)) continue;
+    const looksLikeHsModel = rawTokens[index - 1] === 'hs' || /^0\d/.test(token);
+    if (!looksLikeHsModel && /^\d+(?:w|v|a|mah|mm|cm|pcs?)$/.test(token)) continue;
+    if (/^(?=.*[a-z])(?=.*\d)[a-z\d]+$/.test(token)) modelTokens.add(token);
+  }
+
+  const tipMatch = normalized.match(/\b(\d+)\s*tips?\b/);
+  const hasBox = /\b(?:tool\s*box|toolbox|box)\b/.test(normalized);
+  const hasBareOption = !hasBox && /\bonly\b/.test(normalized);
+
+  return {
+    modelTokens,
+    tipCount: tipMatch ? Number(tipMatch[1]) : null,
+    packageType: hasBox ? 'box' : (hasBareOption ? 'bare' : null)
+  };
+}
+
+function xrayStructuredOptionComparison(referenceLabel, candidateLabel) {
+  const reference = xrayOptionFacts(referenceLabel);
+  const candidate = xrayOptionFacts(candidateLabel);
+  const modelAgreement = [...reference.modelTokens]
+    .some((token) => candidate.modelTokens.has(token));
+  const modelConflict = reference.modelTokens.size > 0
+    && candidate.modelTokens.size > 0
+    && !modelAgreement;
+  const tipAgreement = Number.isFinite(reference.tipCount)
+    && reference.tipCount === candidate.tipCount;
+  const tipConflict = Number.isFinite(reference.tipCount)
+    && Number.isFinite(candidate.tipCount)
+    && !tipAgreement;
+  const packageAgreement = reference.packageType
+    && reference.packageType === candidate.packageType;
+  const packageConflict = reference.packageType
+    && candidate.packageType
+    && !packageAgreement;
+
+  return {
+    exact: Boolean(modelAgreement && tipAgreement && packageAgreement),
+    contradiction: Boolean(modelConflict || tipConflict || packageConflict)
+  };
+}
+
 function xrayWeightedOverlap(reference, candidate) {
   if (!reference.compact.size || !candidate.compact.size) return 0;
   let possible = 0;
@@ -95,6 +145,10 @@ function xrayTextSimilarity(referenceLabel, candidateLabel) {
     if (exactModel) score = Math.max(score, 0.78);
     else if (candidateModels.length) score *= 0.58;
   }
+
+  const structured = xrayStructuredOptionComparison(referenceLabel, candidateLabel);
+  if (structured.contradiction) score = Math.min(score, 0.2);
+  else if (structured.exact) score = Math.max(score, 0.92);
 
   return Math.max(0, Math.min(1, score));
 }
@@ -182,7 +236,7 @@ async function xrayImageSimilarity(referenceUrl, candidateUrl) {
   return xrayHammingSimilarity(referenceHash, candidateHash);
 }
 
-function xrayCombineSignals(textScore, imageScore) {
+function xrayCombineSignals(textScore, imageScore, exactStructuredMatch = false) {
   if (!Number.isFinite(imageScore)) return textScore;
   if (!Number.isFinite(textScore)) return imageScore;
 
@@ -191,14 +245,17 @@ function xrayCombineSignals(textScore, imageScore) {
   const imageWeight = textScore >= 0.72 ? 0.58 : (textScore >= 0.38 ? 0.68 : 0.82);
   let score = (imageScore * imageWeight) + (textScore * (1 - imageWeight));
   if (textScore >= 0.85 && imageScore < 0.28) score *= 0.72;
+  if (exactStructuredMatch) score = Math.max(score, 0.82);
   return Math.max(0, Math.min(1, score));
 }
 
 function xrayCheapPairScore(reference, sku) {
-  const text = xrayTextSimilarity(reference.label, skuDisplayLabel(sku));
+  const candidateLabel = skuDisplayLabel(sku);
+  const text = xrayTextSimilarity(reference.label, candidateLabel);
+  const structured = xrayStructuredOptionComparison(reference.label, candidateLabel);
   const imageExact = xrayCanonicalImageKey(reference.imageUrl)
     && xrayCanonicalImageKey(reference.imageUrl) === xrayCanonicalImageKey(sku.imageUrl);
-  return { text, imageExact: Boolean(imageExact), cheap: imageExact ? 1 : text };
+  return { text, structured, imageExact: Boolean(imageExact), cheap: imageExact ? 1 : text };
 }
 
 async function xrayScoreSkuAgainstReference(reference, sku, allowPixelHash = true) {
@@ -208,7 +265,7 @@ async function xrayScoreSkuAgainstReference(reference, sku, allowPixelHash = tru
   const image = allowPixelHash && reference.imageUrl && sku.imageUrl
     ? await xrayImageSimilarity(reference.imageUrl, sku.imageUrl)
     : null;
-  const score = xrayCombineSignals(cheap.text, image);
+  const score = xrayCombineSignals(cheap.text, image, cheap.structured.exact);
   return { score, text: cheap.text, image };
 }
 
@@ -379,29 +436,30 @@ function xrayAddPanelControls(panel, result) {
   controls.className = 'ali-price-xray-sort-controls';
   Object.assign(controls.style, {
     display: 'flex',
-    gap: '8px',
+    gap: '6px',
     alignItems: 'center',
-    margin: '8px 0 10px',
-    padding: '8px',
+    margin: '4px 0 6px',
+    padding: '6px',
     borderRadius: '8px',
     background: '#f6f7f8'
   });
 
   const hint = document.createElement('div');
-  hint.textContent = 'Select one or more comparable SKUs. Matching uses option text plus attached images.';
+  hint.textContent = 'Tick options to compare, then sort.';
   Object.assign(hint.style, {
     flex: '1',
     minWidth: '0',
     color: '#444',
-    fontSize: isMobileLayout() ? '12px' : '10px'
+    fontSize: isMobileLayout() ? '12px' : '10px',
+    lineHeight: '1.2'
   });
 
   const sort = document.createElement('button');
   sort.type = 'button';
   sort.className = 'ali-price-xray-sort-button';
   Object.assign(sort.style, {
-    minHeight: isMobileLayout() ? '44px' : '30px',
-    padding: '6px 10px',
+    minHeight: isMobileLayout() ? '36px' : '28px',
+    padding: '5px 10px',
     border: '1px solid rgba(0,0,0,.25)',
     borderRadius: '8px',
     background: '#fff',

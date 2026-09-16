@@ -141,19 +141,21 @@ xrayAddPanelControls = function xrayAddPanelControlsStacked(panel, result) {
   Object.assign(controls.style, {
     display: 'flex',
     flexDirection: 'column',
-    gap: '8px',
+    gap: '4px',
     alignItems: 'stretch',
-    margin: '8px 0 10px',
-    padding: '8px',
+    margin: '4px 0 6px',
+    padding: '6px',
     borderRadius: '8px',
     background: '#f6f7f8'
   });
 
   const hint = document.createElement('div');
-  hint.textContent = 'Select one or more comparable options. Matching uses option text plus attached images.';
+  hint.textContent = 'Tick options to compare, then sort.';
   Object.assign(hint.style, {
     color: '#444',
-    fontSize: isMobileLayout() ? '12px' : '10px'
+    fontSize: isMobileLayout() ? '12px' : '10px',
+    lineHeight: '1.2',
+    textAlign: 'center'
   });
 
   const sort = document.createElement('button');
@@ -161,8 +163,8 @@ xrayAddPanelControls = function xrayAddPanelControlsStacked(panel, result) {
   sort.className = 'ali-price-xray-sort-button';
   Object.assign(sort.style, {
     alignSelf: 'center',
-    minHeight: isMobileLayout() ? '44px' : '30px',
-    padding: '6px 10px',
+    minHeight: isMobileLayout() ? '36px' : '28px',
+    padding: '5px 10px',
     border: '1px solid rgba(0,0,0,.25)',
     borderRadius: '8px',
     background: '#fff',

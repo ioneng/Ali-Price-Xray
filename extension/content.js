@@ -363,13 +363,13 @@ function renderPanel(card, result, anchor) {
     flexDirection: 'column',
     overflow: 'hidden',
     boxSizing: 'border-box',
-    padding: '12px',
+    padding: mobile ? '8px' : '10px',
     border: '1px solid rgba(0,0,0,.25)',
     borderRadius: '14px',
     background: 'rgba(255,255,255,.99)',
     color: '#111',
     boxShadow: '0 8px 32px rgba(0,0,0,.32)',
-    font: '14px/1.4 system-ui, sans-serif'
+    font: '14px/1.25 system-ui, sans-serif'
   } : {
     position: 'absolute',
     zIndex: '2147483646',
@@ -387,25 +387,39 @@ function renderPanel(card, result, anchor) {
     background: 'rgba(255,255,255,.98)',
     color: '#111',
     boxShadow: '0 8px 28px rgba(0,0,0,.22)',
-    font: '12px/1.4 system-ui, sans-serif'
+    font: '12px/1.25 system-ui, sans-serif'
   });
 
   const header = document.createElement('div');
   Object.assign(header.style, {
     display: 'flex',
     alignItems: 'center',
-    gap: '8px',
-    margin: mobile ? '-12px -12px 8px' : '0 0 6px',
-    padding: mobile ? '8px 12px' : '0',
+    gap: '6px',
+    margin: mobile ? '-8px -8px 4px' : '0 0 4px',
+    padding: mobile ? '4px 8px' : '0',
     borderBottom: mobile ? '1px solid #eee' : '0',
     background: mobile ? 'rgba(255,255,255,.99)' : 'transparent'
   });
 
+  const titleGroup = document.createElement('div');
+  Object.assign(titleGroup.style, {
+    flex: '1',
+    minWidth: '0'
+  });
+
   const title = document.createElement('div');
   title.style.fontWeight = '700';
-  title.style.flex = '1';
-  title.style.minWidth = '0';
   title.textContent = 'From Price Xray:';
+
+  const itemNumber = document.createElement('div');
+  itemNumber.textContent = `Item ${result.productId}`;
+  Object.assign(itemNumber.style, {
+    marginTop: '1px',
+    color: '#777',
+    fontSize: mobile ? '11px' : '10px',
+    lineHeight: '1.15'
+  });
+  titleGroup.append(title, itemNumber);
 
   const close = document.createElement('button');
   close.type = 'button';
@@ -413,9 +427,9 @@ function renderPanel(card, result, anchor) {
   close.title = 'Close';
   close.setAttribute('aria-label', 'Close Ali-Price-Xray');
   Object.assign(close.style, {
-    width: mobile ? '44px' : '28px',
-    height: mobile ? '44px' : '28px',
-    minWidth: mobile ? '44px' : '28px',
+    width: mobile ? '36px' : '28px',
+    height: mobile ? '36px' : '28px',
+    minWidth: mobile ? '36px' : '28px',
     border: '0',
     borderRadius: '999px',
     background: mobile ? '#f2f2f2' : 'transparent',
@@ -429,7 +443,7 @@ function renderPanel(card, result, anchor) {
     event.stopPropagation();
     panel.remove();
   });
-  header.append(title, close);
+  header.append(titleGroup, close);
   panel.appendChild(header);
 
   if (!result.ok) {
@@ -454,22 +468,14 @@ function renderPanel(card, result, anchor) {
   const unknown = visibleSkus.filter((sku) => sku.salable == null);
   const unavailable = visibleSkus.filter((sku) => sku.salable === false);
   const summary = document.createElement('div');
-  summary.style.marginBottom = '4px';
-  const countText = `${available.length} available variant${available.length === 1 ? '' : 's'}`;
-  summary.textContent = `${countText} · ${moneyWithCurrency(result.min, currency)} – ${moneyWithCurrency(result.max, currency)}`;
+  summary.style.marginBottom = '2px';
+  summary.textContent = `${available.length} available option${available.length === 1 ? '' : 's'}`;
   panel.appendChild(summary);
-
-  if (visibleSkus.length !== result.count || available.length !== result.saleableCount) {
-    const backendCount = document.createElement('div');
-    Object.assign(backendCount.style, { marginBottom: '4px', color: '#777', fontSize: mobile ? '11px' : '10px' });
-    backendCount.textContent = `${result.saleableCount} saleable of ${result.count} backend SKU paths`;
-    panel.appendChild(backendCount);
-  }
 
   if (result.targetPriceString) {
     const target = document.createElement('div');
-    Object.assign(target.style, { marginBottom: '6px', fontWeight: '700', color: '#b00020' });
-    target.textContent = `Displayed price: ${result.targetPriceString}`;
+    Object.assign(target.style, { marginBottom: '3px', fontWeight: '700', color: '#b00020' });
+    target.textContent = `Listed Price: ${result.targetPriceString}`;
     panel.appendChild(target);
   }
 
@@ -541,10 +547,10 @@ function attachXray(card, productId, productUrl) {
     minWidth: mobile ? '56px' : 'auto',
     minHeight: mobile ? '44px' : 'auto',
     padding: mobile ? '8px 12px' : '4px 8px',
-    border: '1px solid rgba(0,0,0,.28)',
+    border: '1px solid #2f2f2f',
     borderRadius: '999px',
-    background: 'rgba(255,255,255,.96)',
-    color: '#111',
+    background: '#3f3f3f',
+    color: '#fff',
     boxShadow: '0 1px 5px rgba(0,0,0,.15)',
     font: mobile ? '700 13px/1.3 system-ui, sans-serif' : '600 11px/1.3 system-ui, sans-serif',
     cursor: 'pointer',
@@ -605,9 +611,44 @@ function ensureDebugBadge() {
   return badge;
 }
 
-function scan() {
+function ensureLoadingNotice() {
+  let notice = document.getElementById('ali-price-xray-loading');
+  if (notice) return notice;
+
+  notice = document.createElement('div');
+  notice.id = 'ali-price-xray-loading';
+  notice.setAttribute('role', 'status');
+  notice.setAttribute('aria-live', 'polite');
+  Object.assign(notice.style, {
+    position: 'fixed',
+    zIndex: '2147483647',
+    top: 'max(112px, calc(env(safe-area-inset-top) + 112px))',
+    left: '50%',
+    transform: 'translateX(-50%)',
+    width: 'max-content',
+    maxWidth: 'calc(100vw - 24px)',
+    boxSizing: 'border-box',
+    padding: isMobileLayout() ? '18px 28px' : '16px 26px',
+    border: '2px solid #86c995',
+    borderRadius: '12px',
+    background: 'rgba(220,252,231,.97)',
+    color: '#14532d',
+    boxShadow: '0 6px 24px rgba(0,0,0,.18)',
+    font: isMobileLayout() ? '700 26px/1.25 system-ui, sans-serif' : '700 24px/1.25 system-ui, sans-serif',
+    letterSpacing: '0',
+    textAlign: 'center',
+    whiteSpace: 'normal',
+    overflowWrap: 'anywhere',
+    opacity: '1',
+    transition: 'opacity 3s ease',
+    pointerEvents: 'none'
+  });
+  document.documentElement.appendChild(notice);
+  return notice;
+}
+
+function attachXrayToCandidates(candidates) {
   const badge = ensureDebugBadge();
-  const candidates = candidateCards();
   let attached = 0;
   for (const { productId, card, productUrl } of candidates) {
     if (!productId || card.dataset.aliPriceXraySeen === productId) continue;
@@ -620,12 +661,141 @@ function scan() {
   if (attached) log(`attached to ${attached} cards; ${buttons} total`);
 }
 
+const XRAY_LOAD_SCROLL_STEP_VIEWPORTS = 2;
+const XRAY_LOAD_SCROLL_BOTTOM_HOLD_MS = 500;
+const XRAY_LOAD_FINAL_WAIT_MS = 500;
+const xrayLoadState = {
+  active: true,
+  autoScrollStarted: false,
+  sweeping: false,
+  progress: 0,
+  candidates: new Map()
+};
+
 let timer = 0;
-function scheduleScan() {
+function scheduleScan(delay = 150) {
   clearTimeout(timer);
-  timer = window.setTimeout(scan, 150);
+  timer = window.setTimeout(scan, delay);
 }
 
-new MutationObserver(scheduleScan).observe(document.documentElement, { childList: true, subtree: true });
+function xrayWait(delay) {
+  return new Promise((resolve) => window.setTimeout(resolve, delay));
+}
+
+function xrayNextAnimationFrame() {
+  return new Promise((resolve) => window.requestAnimationFrame(resolve));
+}
+
+function xrayRememberCandidates(candidates) {
+  for (const candidate of candidates) {
+    xrayLoadState.candidates.set(String(candidate.productId), candidate);
+  }
+}
+
+function xrayUpdateLoadingProgress(percent) {
+  xrayLoadState.progress = Math.max(xrayLoadState.progress, Math.min(99, Math.round(percent)));
+  const notice = ensureLoadingNotice();
+  const text = `Price Xray Loading ${xrayLoadState.progress}%`;
+  if (notice.textContent !== text) notice.textContent = text;
+}
+
+async function xraySweepToBottom(startX, offsetViewports, progressStart, progressEnd) {
+  const scrollingElement = document.scrollingElement || document.documentElement;
+  const viewportHeight = Math.max(window.innerHeight, 1);
+  const step = viewportHeight * XRAY_LOAD_SCROLL_STEP_VIEWPORTS;
+  const initialBottom = Math.max(0, scrollingElement.scrollHeight - viewportHeight);
+  let top = Math.min(initialBottom, viewportHeight * offsetViewports);
+
+  window.scrollTo({ left: startX, top, behavior: 'auto' });
+  await xrayNextAnimationFrame();
+  while (true) {
+    const bottom = Math.max(0, scrollingElement.scrollHeight - viewportHeight);
+    xrayRememberCandidates(candidateCards());
+    const ratio = bottom ? top / bottom : 1;
+    xrayUpdateLoadingProgress(progressStart + ((progressEnd - progressStart) * ratio));
+    if (top >= bottom) break;
+    top = Math.min(bottom, top + step);
+    window.scrollTo({ left: startX, top, behavior: 'auto' });
+    await xrayNextAnimationFrame();
+  }
+  await xrayWait(XRAY_LOAD_SCROLL_BOTTOM_HOLD_MS);
+  xrayRememberCandidates(candidateCards());
+  xrayUpdateLoadingProgress(progressEnd);
+}
+
+async function xrayNudgeNearStart(startX, startY) {
+  const scrollingElement = document.scrollingElement || document.documentElement;
+  const viewportHeight = Math.max(window.innerHeight, 1);
+  const bottom = Math.max(0, scrollingElement.scrollHeight - viewportHeight);
+  const nudgeTop = Math.min(bottom, startY + Math.max(160, Math.round(viewportHeight / 4)));
+
+  window.scrollTo({ left: startX, top: startY, behavior: 'auto' });
+  await xrayNextAnimationFrame();
+  window.scrollTo({ left: startX, top: nudgeTop, behavior: 'auto' });
+  await xrayNextAnimationFrame();
+  await xrayNextAnimationFrame();
+  xrayRememberCandidates(candidateCards());
+  window.scrollTo({ left: startX, top: startY, behavior: 'auto' });
+  await xrayNextAnimationFrame();
+}
+
+function xrayFinishInitialLoad() {
+  if (!xrayLoadState.active) return;
+  xrayLoadState.active = false;
+  const notice = ensureLoadingNotice();
+  notice.textContent = 'Price Xray Loading 100%';
+  const candidates = [...xrayLoadState.candidates.values()]
+    .filter(({ card }) => card?.isConnected !== false);
+  attachXrayToCandidates(candidates);
+  window.requestAnimationFrame(() => {
+    notice.style.opacity = '0';
+    window.setTimeout(() => notice.remove(), 3000);
+  });
+}
+
+async function xrayRunInitialScrollSweep(startX, startY) {
+  try {
+    await xraySweepToBottom(startX, 0, 1, 47);
+    await xraySweepToBottom(startX, 1, 48, 92);
+    await xrayNudgeNearStart(startX, startY);
+    xrayUpdateLoadingProgress(95);
+    const waitStartedAt = Date.now();
+    while (Date.now() - waitStartedAt < XRAY_LOAD_FINAL_WAIT_MS) {
+      await xrayWait(50);
+      xrayRememberCandidates(candidateCards());
+      const ratio = (Date.now() - waitStartedAt) / XRAY_LOAD_FINAL_WAIT_MS;
+      xrayUpdateLoadingProgress(95 + (4 * ratio));
+    }
+  } catch (error) {
+    log('initial scroll sweep failed', error);
+  } finally {
+    xrayLoadState.sweeping = false;
+    window.scrollTo({ left: startX, top: startY, behavior: 'auto' });
+    xrayRememberCandidates(candidateCards());
+    xrayFinishInitialLoad();
+  }
+}
+
+function triggerInitialLazyLoad() {
+  if (xrayLoadState.autoScrollStarted) return;
+  xrayLoadState.autoScrollStarted = true;
+  xrayLoadState.sweeping = true;
+  xrayRunInitialScrollSweep(window.scrollX, window.scrollY);
+}
+
+function scan() {
+  const candidates = candidateCards();
+  xrayRememberCandidates(candidates);
+  if (!xrayLoadState.active) {
+    attachXrayToCandidates(candidates);
+    return;
+  }
+
+  if (!candidates.length && !document.querySelector('a[href*="/item/"]')) return;
+  xrayUpdateLoadingProgress(0);
+  triggerInitialLazyLoad();
+}
+
+new MutationObserver(() => scheduleScan()).observe(document.documentElement, { childList: true, subtree: true });
 scan();
 log('content script loaded', location.href);

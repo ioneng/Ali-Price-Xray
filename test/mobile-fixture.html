@@ -71,15 +71,25 @@
   <script src="../extension/content-sort.js"></script>
   <script src="../extension/content-sort-runtime.js"></script>
   <script>
-    document.querySelector('.ali-price-xray-button')?.click();
-    setTimeout(() => {
+    const openPanel = () => {
+      const button = document.querySelector('.ali-price-xray-button');
+      if (!button) return false;
+      button.click();
       if (location.hash === '#preview') {
         document.querySelector('.ali-price-xray-panel img')?.click();
       }
       if (location.hash === '#unavailable') {
         document.querySelector('.ali-price-xray-panel details > summary')?.click();
       }
-    }, 0);
+      return true;
+    };
+    if (!openPanel()) {
+      const observer = new MutationObserver(() => {
+        if (!openPanel()) return;
+        observer.disconnect();
+      });
+      observer.observe(document.documentElement, { childList: true, subtree: true });
+    }
   </script>
 </body>
 </html>
